@@ -18,7 +18,7 @@ import * as neo4j_driver from "neo4j-driver";
 import { Genkit, z } from "genkit";
 import { GenkitPlugin, genkitPlugin } from "genkit/plugin";
 
-import { EmbedderArgument, Embedding } from "genkit/embedder";
+import { EmbedderArgument } from "genkit/embedder";
 import {
   CommonRetrieverOptionsSchema,
   Document,
@@ -27,24 +27,11 @@ import {
 } from "genkit/retriever";
 import { constructMetadataFilter } from "./filter-utils";
 
-// const WhereSchema: z.ZodType<Where> = z.any();
-// const WhereDocumentSchema: z.ZodType<WhereDocument> = z.any();
-
-// const IncludeOptionSchema = z
-//   .array(z.enum(['documents', 'embeddings', 'metadatas', 'distances']))
-//   .optional();
-// type IncludeOption = z.infer<typeof IncludeOptionSchema>;
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-  // include: IncludeOptionSchema,
   filter: z.record(z.string(), z.any()).optional(),
-  // whereDocument: WhereDocumentSchema.optional(),
 });
 
-// const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-//   k: z.number().max(1000),
-//   where: z.record(z.string(), z.any()).optional(), // later for metadata filtering
-// });
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -183,7 +170,7 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, params);
+      const retriever_query = retrieverQuery(options, indexId);
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -216,38 +203,21 @@ export function configureNeo4jRetriever<
 const retrieverQuery = (options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-    // TODO - create interface without embedderOptions etc..
-
-    
-  }, params: Neo4jParams<any>): {query: string, additionalParams: Record<string, any>} => {
+  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
 
-  // const parallelQuery = // todo - this.isEnterprise
-  //       ? "CYPHER runtime = parallel parallelRuntimeSupport=all "
-  //       : "";
-  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
-
-
-  // TODO - commonize params?.embeddingProperty ?? "embedding" and indexer one, 
-  // etc..
-
-  // TODO - customize it
-  const nodeLabel = params?.label ?? params.indexId;
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const nodeLabel = indexId;
   
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const embeddingNodeProperty = "embedding";
 
-  // TODO - customize it
-  const embeddingNodeProperty = params?.embeddingProperty ?? "embedding";
-
-  // TODO - customize it
-  const textNodeProperty = params?.textProperty ?? "text";
-  const idNodeProperty = params?.textProperty ?? "id";
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const textNodeProperty = "text";
   
-
-  // TODO - is wrong, return {text: null, embedding: null, ....} as metadata
-
-  // TODO - customize it
-  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, ${textNodeProperty}: Null,
-      ${embeddingNodeProperty}: Null, ${idNodeProperty}: Null } AS metadata`;
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/3
+  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
+      embedding: Null, id: Null } AS metadata`;
 
   if (filter == null) {
     return {query: `
@@ -257,10 +227,9 @@ const retrieverQuery = (options: {
       additionalParams: {}
     };
   }
-
   
   const baseIndexQuery = `
-    ${parallelQuery}
+    CYPHER runtime = parallel parallelRuntimeSupport=all 
     MATCH (n:\`${nodeLabel}\`)
     WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
     // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
@@ -279,42 +248,6 @@ const retrieverQuery = (options: {
 
   return {query: indexQuery, additionalParams: fParams};
 }
-
-
-// TODO - add this
-// async _verifyVersion() {
-//     try {
-//       const data = await this.query("CALL dbms.components()");
-//       const versionString: string = data[0].versions[0];
-//       const targetVersion = [5, 11, 0];
-
-//       let version: number[];
-
-//       if (versionString.includes("aura")) {
-//         // Get the 'x.y.z' part before '-aura'
-//         const baseVersion = versionString.split("-")[0];
-//         version = baseVersion.split(".").map(Number);
-//         version.push(0);
-//       } else {
-//         version = versionString.split(".").map(Number);
-//       }
-
-//       if (isVersionLessThan(version, targetVersion)) {
-//         throw new Error(
-//           "Version index is only supported in Neo4j version 5.11 or greater"
-//         );
-//       }
-
-//       const metadataTargetVersion = [5, 18, 0];
-//       if (isVersionLessThan(version, metadataTargetVersion)) {
-//         this.supportMetadataFilter = false;
-//       }
-
-//       this.isEnterprise = data[0].edition === "enterprise";
-//     } catch (error) {
-//       console.error("Database version check failed:", error);
-//     }
-//   }
 
 
 /**
