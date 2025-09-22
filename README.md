@@ -54,3 +54,14 @@ let docs = await ai.retrieve({ retriever: bobFactsRetriever, query });
 ```
 
 Usage information and reference details can be found in [Genkit documentation](https://firebase.google.com/docs/genkit).
+
+
+TODO:
+https://github.com/firebase/genkit/blob/main/js/plugins/firebase/src/firestore-retriever.ts#L143
+
+https://python.langchain.com/docs/integrations/vectorstores/neo4jvector/#metadata-filtering
+
+
+DOING:
+https://github.dev/langchain-ai/langchainjs/blob/main/examples/src/indexes/vector_stores/neo4j_vector
+  --> neo4j_vector.ts

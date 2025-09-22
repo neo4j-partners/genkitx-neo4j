@@ -25,11 +25,26 @@ import {
   indexerRef,
   retrieverRef,
 } from "genkit/retriever";
+import { constructMetadataFilter } from "./filter-utils";
+
+// const WhereSchema: z.ZodType<Where> = z.any();
+// const WhereDocumentSchema: z.ZodType<WhereDocument> = z.any();
+
+// const IncludeOptionSchema = z
+//   .array(z.enum(['documents', 'embeddings', 'metadatas', 'distances']))
+//   .optional();
+// type IncludeOption = z.infer<typeof IncludeOptionSchema>;
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-  k: z.number().max(1000),
-  // filter: z.record(z.string(), z.any()).optional(), later for metadata filtering
+  // include: IncludeOptionSchema,
+  filter: z.record(z.string(), z.any()).optional(),
+  // whereDocument: WhereDocumentSchema.optional(),
 });
+
+// const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
+//   k: z.number().max(1000),
+//   where: z.record(z.string(), z.any()).optional(), // later for metadata filtering
+// });
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -154,17 +169,14 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = `
-        CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
-        RETURN node.text AS text, node {.*, text: Null,
-        embedding: Null, id: Null } AS metadata
-        `;
+      const retriever_query = retrieverQuery(options, indexId);
       const response = await neo4j_instance.executeQuery(
-        retriever_query,
+        retriever_query.query,
         {
           k: options.k,
           embedding: queryEmbeddings[0].embedding,
           index: indexId,
+          ...retriever_query.additionalParams
         },
         {
           database: neo4jConfig.database,
@@ -186,6 +198,94 @@ export function configureNeo4jRetriever<
     },
   );
 }
+
+const retrieverQuery = (options: {
+    filter?: Record<string, any> | undefined;
+    k?: number | undefined;
+  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
+  const filter = options.filter;
+
+  // TODO - customize it
+  const retrievalQuery = `RETURN node.text AS text, node {.*, text: Null,
+      embedding: Null, id: Null } AS metadata`;
+
+  if (filter == null) {
+    return {query: `
+      CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
+      ${retrievalQuery}
+      `,
+      additionalParams: {}
+    };
+  }
+
+  // const parallelQuery = // todo - this.isEnterprise
+  //       ? "CYPHER runtime = parallel parallelRuntimeSupport=all "
+  //       : "";
+  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
+
+  // TODO - customize it
+  const nodeLabel = indexId;
+  
+  // TODO - customize it
+  const embeddingNodeProperty = "embedding";
+  
+  const baseIndexQuery = `
+    ${parallelQuery}
+    MATCH (n:\`${nodeLabel}\`)
+    WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
+    // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
+    AND
+  `;
+
+  const baseCosineQuery = `
+    WITH n as node, vector.similarity.cosine(
+      n.\`${embeddingNodeProperty}\`,
+      $embedding
+    ) AS score ORDER BY score DESC LIMIT toInteger($k)
+  `;
+  const [fSnippets, fParams] = constructMetadataFilter(filter);
+
+  const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
+
+  return {query: indexQuery, additionalParams: fParams};
+}
+
+
+// TODO - add this
+// async _verifyVersion() {
+//     try {
+//       const data = await this.query("CALL dbms.components()");
+//       const versionString: string = data[0].versions[0];
+//       const targetVersion = [5, 11, 0];
+
+//       let version: number[];
+
+//       if (versionString.includes("aura")) {
+//         // Get the 'x.y.z' part before '-aura'
+//         const baseVersion = versionString.split("-")[0];
+//         version = baseVersion.split(".").map(Number);
+//         version.push(0);
+//       } else {
+//         version = versionString.split(".").map(Number);
+//       }
+
+//       if (isVersionLessThan(version, targetVersion)) {
+//         throw new Error(
+//           "Version index is only supported in Neo4j version 5.11 or greater"
+//         );
+//       }
+
+//       const metadataTargetVersion = [5, 18, 0];
+//       if (isVersionLessThan(version, metadataTargetVersion)) {
+//         this.supportMetadataFilter = false;
+//       }
+
+//       this.isEnterprise = data[0].edition === "enterprise";
+//     } catch (error) {
+//       console.error("Database version check failed:", error);
+//     }
+//   }
+
 
 /**
  * Configures a Neo4j indexer.
@@ -296,3 +396,4 @@ function getDefaultConfig() {
     ...(database && { database }),
   };
 }
+
