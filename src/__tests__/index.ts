@@ -35,6 +35,8 @@ describe('Neo4j Plugin Integration', () => {
     });
   });
 
+  // todo - TESTS
+
 
   test('should successfully index a document and retrieve it', async () => {
     const uniqueId = `test-doc-${Date.now()}`;

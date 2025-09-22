@@ -169,7 +169,7 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, indexId);
+      const retriever_query = retrieverQuery(options, params);
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -202,11 +202,28 @@ export function configureNeo4jRetriever<
 const retrieverQuery = (options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
+  }, params: any): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
 
+  // const parallelQuery = // todo - this.isEnterprise
+  //       ? "CYPHER runtime = parallel parallelRuntimeSupport=all "
+  //       : "";
+  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
+
   // TODO - customize it
-  const retrievalQuery = `RETURN node.text AS text, node {.*, text: Null,
+  const nodeLabel = params?.indexId;
+  
+  // TODO - customize it
+  const embeddingNodeProperty = "embedding";
+
+  // TODO - customize it
+  const textNodeProperty = "text";
+  
+
+  // TODO - is wrong, return {text: null, embedding: null, ....} as metadata
+
+  // TODO - customize it
+  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
 
   if (filter == null) {
@@ -218,16 +235,6 @@ const retrieverQuery = (options: {
     };
   }
 
-  // const parallelQuery = // todo - this.isEnterprise
-  //       ? "CYPHER runtime = parallel parallelRuntimeSupport=all "
-  //       : "";
-  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
-
-  // TODO - customize it
-  const nodeLabel = indexId;
-  
-  // TODO - customize it
-  const embeddingNodeProperty = "embedding";
   
   const baseIndexQuery = `
     ${parallelQuery}
