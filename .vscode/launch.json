@@ -8,7 +8,7 @@
       "program": "${workspaceRoot}/node_modules/.bin/jest",
       "args": [
         "--runInBand",
-        "${workspaceRoot}/src/__tests__/index.ts"
+        "${workspaceRoot}/src/__tests__/session.ts"
       ],
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
