@@ -89,6 +89,7 @@ If not specified, the default label will be `Neo4j - <indexId>`
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
+  a?: string;
 }) => {
   return indexerRef({
     name: `neo4j/${params.indexId}`,
@@ -98,6 +99,18 @@ export const neo4jIndexerRef = (params: {
     //configSchema: Neo4jIndexerOptionsSchema.optional(),
   });
 };
+
+interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
+    indexId: string;
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+    // TODO - common interface
+    clientParams?: Neo4jGraphConfig;
+    label?: string;
+    textProperty?: string;
+    embeddingProperty?: string;
+    idProperty?: string;
+  }
 
 /**
  * Neo4j plugin that provides a Neo4j retriever and indexer
@@ -111,12 +124,7 @@ and NEO4J_PASSWORD environment variable will be used instead.
  * @returns The Neo4j Genkit plugin
  */
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
-  params: {
-    clientParams?: Neo4jGraphConfig;
-    indexId: string;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  }[],
+  params: Neo4jParams<EmbedderCustomOptions>[],
 ): GenkitPlugin {
   return genkitPlugin("neo4j", async (ai: Genkit) => {
     params.map((i) => configureNeo4jRetriever(ai, i));
@@ -125,6 +133,16 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 }
 
 export default neo4j;
+
+
+/*
+     * @param label: the optional label name (default: "Document")
+     * @param embeddingProperty: the optional embeddingProperty name (default: "embedding")
+     * @param idProperty: the optional id property name (default: "id")
+     * @param metadataPrefix: the optional metadata prefix (default: "")
+     * @param textProperty: the optional textProperty property name (default: "text")
+     * @param indexName: the optional index name (default: "vector")
+*/
 
 /**
  * Configures a Neo4j retriever.
@@ -142,12 +160,8 @@ export function configureNeo4jRetriever<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  params: {
-    indexId: string;
-    clientParams?: Neo4jGraphConfig;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  },
+  params: Neo4jParams<EmbedderCustomOptions>,
+  // b?: string
 ) {
   const { indexId, embedder, embedderOptions } = {
     ...params,
@@ -169,7 +183,7 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, indexId);
+      const retriever_query = retrieverQuery(options, params);
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -202,7 +216,10 @@ export function configureNeo4jRetriever<
 const retrieverQuery = (options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
+    // TODO - create interface without embedderOptions etc..
+
+    
+  }, params: Neo4jParams<any>): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
 
   // const parallelQuery = // todo - this.isEnterprise
@@ -210,21 +227,27 @@ const retrieverQuery = (options: {
   //       : "";
   const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
 
-  // TODO - customize it
-  const nodeLabel = indexId;
-  
-  // TODO - customize it
-  const embeddingNodeProperty = "embedding";
+
+  // TODO - commonize params?.embeddingProperty ?? "embedding" and indexer one, 
+  // etc..
 
   // TODO - customize it
-  const textNodeProperty = "text";
+  const nodeLabel = params?.label ?? params.indexId;
+  
+
+  // TODO - customize it
+  const embeddingNodeProperty = params?.embeddingProperty ?? "embedding";
+
+  // TODO - customize it
+  const textNodeProperty = params?.textProperty ?? "text";
+  const idNodeProperty = params?.textProperty ?? "id";
   
 
   // TODO - is wrong, return {text: null, embedding: null, ....} as metadata
 
   // TODO - customize it
-  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
-      embedding: Null, id: Null } AS metadata`;
+  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, ${textNodeProperty}: Null,
+      ${embeddingNodeProperty}: Null, ${idNodeProperty}: Null } AS metadata`;
 
   if (filter == null) {
     return {query: `
@@ -310,14 +333,20 @@ export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  params: {
-    indexId: string;
-    clientParams?: Neo4jGraphConfig;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  },
+  // params: {
+  //   indexId: string;
+  //   clientParams?: Neo4jGraphConfig;
+  //   embedder: EmbedderArgument<EmbedderCustomOptions>;
+  //   embedderOptions?: z.infer<EmbedderCustomOptions>;
+  //   // TODO - FORSE QUI???
+  // },
+  params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, embedder, embedderOptions } = {
+  const { indexId, embedder, embedderOptions, 
+    label, 
+    embeddingProperty = 'embedding',
+    idProperty,
+    textProperty = 'text' } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
@@ -343,6 +372,7 @@ export function configureNeo4jIndexer<
       );
 
       const BATCH_SIZE = 1000;
+      const labelName = label || indexId;
 
       for (let i = 0; i < docs.length; i += BATCH_SIZE) {
         const batchDocs = docs.slice(i, i + BATCH_SIZE);
@@ -351,19 +381,24 @@ export function configureNeo4jIndexer<
         const batchParams = batchDocs.map((el, j) => ({
           text: el.content[0]["text"],
           metadata: el.metadata ?? {},
+          // todo - change it???
           embedding: batchEmbeddings[j][0]["embedding"],
         }));
+
+        const createOrMerge = idProperty 
+          ? `MERGE (t:\`${labelName}\` {${idProperty}: row.id})`
+          : `CREATE (t:\`${labelName}\`)`;
 
         await neo4j_instance.executeQuery(
           `
           UNWIND $data AS row
-          CREATE (t:\`${indexId}\`)
-          SET t.text = row.text,
+          ${createOrMerge}
+          SET t.${textProperty} = row.text,
               t += row.metadata
           WITH t, row.embedding AS embedding
-          CALL db.create.setNodeVectorProperty(t, 'embedding', embedding)
+          CALL db.create.setNodeVectorProperty(t, $embedding, embedding)
           `,
-          { data: batchParams },
+          { data: batchParams, embedding: embeddingProperty },
           { database: neo4jConfig.database },
         );
       }
@@ -371,7 +406,7 @@ export function configureNeo4jIndexer<
       await neo4j_instance.executeQuery(
         `
         CREATE VECTOR INDEX $indexName IF NOT EXISTS
-        FOR (n:\`${indexId}\`) ON n.embedding
+        FOR (n:\`${labelName}\`) ON n.embedding
         `,
         { indexName: indexId },
         { database: neo4jConfig.database },

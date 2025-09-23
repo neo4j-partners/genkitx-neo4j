@@ -68,6 +68,7 @@ async function main() {
   const bobFactsIndexer = neo4jIndexerRef({
     indexId: 'bob-facts2',
     displayName: 'Bob Facts Indexer',
+    a: '1'
   });
   await ai.index({ indexer: bobFactsIndexer, documents: [newDocument] });
 
