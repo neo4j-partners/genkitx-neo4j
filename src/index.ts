@@ -101,20 +101,16 @@ export const neo4jIndexerRef = (params: {
 };
 
 interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
-  indexId: string;
-  embedder: EmbedderArgument<EmbedderCustomOptions>;
-  embedderOptions?: z.infer<EmbedderCustomOptions>;
-  // TODO - common interface
-  clientParams?: Neo4jGraphConfig;
-  label?: string;
-  textProperty?: string;
-  embeddingProperty?: string;
-  idProperty?: string;
-  searchType?: SearchType;
-  fullTextRetrievalQuery?: string;
-  fullTextIndexName?: string;
-  fullTextQuery?: string;
-}
+    indexId: string;
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+    // TODO - common interface
+    clientParams?: Neo4jGraphConfig;
+    label?: string;
+    textProperty?: string;
+    embeddingProperty?: string;
+    idProperty?: string;
+  }
 
 /**
  * Neo4j plugin that provides a Neo4j retriever and indexer
@@ -249,44 +245,19 @@ const retrieverQuery = (options: {
 
   // TODO - is wrong, return {text: null, embedding: null, ....} as metadata
 
-  /*
-        this.autoCreateFullText = autoCreateFullText;
-        this.fullTextIndexName = getOrDefault(fullTextIndexName, DEFAULT_FULLTEXT_IDX_NAME);
-        this.fullTextQuery = fullTextQuery;
-        this.fullTextRetrievalQuery = getOrDefault(fullTextRetrievalQuery, this.retrievalQuery);
-  */
-  
-
   // TODO - customize it
   const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, ${textNodeProperty}: Null,
       ${embeddingNodeProperty}: Null, ${idNodeProperty}: Null } AS metadata`;
 
-  const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
-
   if (filter == null) {
-    const vectorQuery = `
+    return {query: `
       CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
       ${retrievalQuery}
-      `;
-      
-    const query = params?.searchType === SearchType.hybrid
-      ? `${vectorQuery} 
-        UNION 
-        CALL db.index.fulltext.queryNodes("${params?.fullTextIndexName ?? params.indexId}", $fullTextQuery) YIELD node, score 
-        ${fullTextRetrievalQuery}
-        `
-      : vectorQuery;
-
-    const additionalParams = params?.searchType === SearchType.hybrid
-      ? {fullTextQuery: params?.fullTextQuery ?? ""}
-      : {};
-
-    return { query, additionalParams };
+      `,
+      additionalParams: {}
+    };
   }
 
-  if (params?.searchType === SearchType.hybrid) {
-    throw new Error("Metadata filtering can't be use in combination with a hybrid search approach.");
-  }
   
   const baseIndexQuery = `
     ${parallelQuery}
@@ -375,9 +346,7 @@ export function configureNeo4jIndexer<
     label, 
     embeddingProperty = 'embedding',
     idProperty,
-    textProperty = 'text',
-    searchType = SearchType.vector,
-  } = {
+    textProperty = 'text' } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
@@ -442,19 +411,6 @@ export function configureNeo4jIndexer<
         { indexName: indexId },
         { database: neo4jConfig.database },
       );
-
-      if (searchType === SearchType.hybrid) {
-        await neo4j_instance.executeQuery(
-          `
-          CREATE FULLTEXT INDEX $indexName_fulltext IF NOT EXISTS
-          FOR (n:\`${labelName}\`)
-          ON EACH [n.\`${textProperty}\`]
-          `,
-          { indexName: indexId },
-          { database: neo4jConfig.database },
-        );
-      }
-
       neo4j_instance.close();
     },
   );
@@ -482,6 +438,4 @@ function getDefaultConfig() {
     ...(database && { database }),
   };
 }
-
-enum SearchType { vector, hybrid }
 
