@@ -1,69 +1,188 @@
 import { genkit } from "genkit";
-import { googleAI, gemini15Pro, textEmbeddingGecko001 } from "@genkit-ai/googleai";
-import { defineFirestoreRetriever } from "@genkit-ai/firebase";
-import * as admin from "firebase-admin";
-import neo4j from "neo4j-driver";
 import { z } from "zod";
+import { driver as neo4jDriver, auth, Driver } from "neo4j-driver";
+import { neo4jIndexerRef, neo4jRetrieverRef } from "./src";
+
+/*
+TODO:
+
+https://github.com/firebase/genkit/blob/main/js/testapps/rag/src/simple-rag.ts#L74
+
+
+https://github.dev/langchain4j/langchain4j-community
+    - ParentChildEmbeddingStoreIngestor
+    final ParentChildEmbeddingStoreIngestor ingestor = ParentChildEmbeddingStoreIngestor.builder()
+                .documentSplitter(splitter)
+                .embeddingStore(embeddingStore)
+                .embeddingModel(embeddingModel)
+                .build();
+
+
+
+Dire qualcosa tipo: non ci sono interfacce per RAG in genkit, 
+quindi creo un retriever che fa una ricerca full text su neo4j e ritorna i nodi trovati come documenti.
+
+todo todo ------> https://chatgpt.com/share/68df8a01-2db8-800c-a111-71cc129aebe1
+
+
+- [ ] graphRAG retriever: TODO
+    - [ ] https://github.com/firebase/genkit/blob/main/js/testapps/rag/src/simple-rag.ts
+https://github.dev/langchain4j/langchain4j-community
+
+--->tipo questo qua ParentChildEmbeddingStoreIngestor
+
+
+- SummaryGraphIngestor
+
+- ParentChildGraphIngestor
+
+- final ParentChildEmbeddingStoreIngestor ingestor = ParentChildEmbeddingStoreIngestor.builder()
+                .documentSplitter(splitter)
+                .embeddingStore(embeddingStore)
+                .embeddingModel(embeddingModel)
+                .build();
+
+
+*/
+
+
+
+
+
+
+// -------------------------------
+// 🔹 Mock Embedder Plugin
+// -------------------------------
+
+/*function  mockEmbedderPlugin() {
+  return {
+    name: "mock-embedder-plugin",
+    version: "v2" as const,
+    setup(ai: any) {
+      ai.defineEmbedder(
+        {
+          name: "mock-embedder",
+          inputSchema: z.string(),
+          outputSchema: z.array(
+            z.object({
+              embedding: z.array(z.number()),
+            })
+          ),
+        },
+        async (text: string) => {
+          const vector = Array.from({ length: 10 }, (_, i) =>
+            Math.sin(text.charCodeAt(0) + i)
+          );
+          return [{ embedding: vector }];
+        }
+      );
+    },
+  };
+} */
+
+// -------------------------------
+// 🔹 Neo4j Plugin Retriever
+// -------------------------------
+function neo4jRetrieverPlugin(driver: Driver, indexId: string) {
+  return {
+    name: "neo4j-retriever-plugin",
+    version: "v2" as const,
+    setup(ai: any) {
+      ai.defineRetriever(
+        {
+          name: "neo4jRetriever",
+          configSchema: z
+            .object({
+              k: z.number().optional(),
+            })
+            .optional(),
+          content: "text",
+          metadata: ["source", "embedding"],
+        },
+        async (input: { text: string }, config?: { k?: number }) => {
+          const k = config?.k ?? 5;
+          const session = driver.session();
+          try {
+            const result = await session.run(
+              `
+              MATCH (e:${indexId})
+              WHERE e.name CONTAINS $q
+              RETURN e.name as text, e.embedding as embedding
+              LIMIT $limit
+              `,
+              { q: input.text, limit: k }
+            );
+
+            return result.records.map((rec) => ({
+              text: rec.get("text"),
+              embedding: rec.get("embedding"),
+              metadata: { source: "neo4j" },
+            }));
+          } finally {
+            await session.close();
+          }
+        }
+      );
+    },
+  };
+}
 
 // -------------------------------
 // 🔑 INIT
 // -------------------------------
-admin.initializeApp();
-const firestore = admin.firestore();
+const driver = neo4jDriver(
+  "bolt://localhost:7687",
+  auth.basic("neo4j", "apoc12345")
+);
+
+const indexId = 'genkit-test-index';
 
 const ai = genkit({
-  plugins: [googleAI()],
+  plugins: [neo4jRetrieverPlugin(driver, indexId)],
 });
 
-const driver = neo4j.driver(
-  "bolt://localhost:7687",
-  neo4j.auth.basic("neo4j", "password")
-);
+
+
+const INDEXER_REF = neo4jIndexerRef({ indexId });
+const RETRIEVER_REF = neo4jRetrieverRef({ indexId });
+
+const embedder = ai.defineEmbedder(
+    { name: 'echoEmbedder' },
+    async (input, config) => {
+      (embedder as any).lastRequest = [input, config];
+      return {
+        embeddings: [
+          {
+            embedding: [1, 2, 3, 4],
+          },
+        ],
+      };
+    }
+  );
+
+// const embedder = "mock-embedder-plugin/mock-embedder";
 
 // -------------------------------
 // 📥 INGESTION
 // -------------------------------
-async function ingestDocument(docId: string, text: string) {
-  // 1. Embedding
-  const embeddings = await ai.embed({
-    embedder: textEmbeddingGecko001,
-    content: text,
-  });
-  const embedding = embeddings[0].embedding;
+async function ingestDocument(text: string) {
+  const result = await ai.embed({ embedder, content: text });
+  const embedding = result[0].embedding;
 
-  // 2. Salva in Firestore
-  await firestore.collection("documentsCollection").doc(docId).set({
-    text,
-    embedding,
-  });
+  const entities = text.match(/\b[A-Z][a-z]+\b/g) || [];
+  const relations = entities.slice(0, -1).map((e, i) => ({
+    from: e,
+    to: entities[i + 1],
+    type: "related",
+  }));
 
-  // 3. Estrazione entità/relazioni
-  const entityResponse = await ai.generate({
-    model: gemini15Pro,
-    prompt: `
-      Estrai entità e relazioni dal testo seguente.
-      Rispondi in JSON come:
-      { "entities": ["..."], "relations": [{ "from": "...", "to": "...", "type": "..."}] }
-      Testo: ${text}
-    `,
-  });
-
-  let entities: string[] = [];
-  let relations: { from: string; to: string; type: string }[] = [];
-
-  try {
-    const parsed = JSON.parse(entityResponse.text);
-    entities = parsed.entities ?? [];
-    relations = parsed.relations ?? [];
-  } catch (e) {
-    console.warn("⚠️ Parsing entità fallito:", entityResponse.text);
-  }
-
-  // 4. Salva in Neo4j
   const session = driver.session();
   try {
     for (const e of entities) {
-      await session.run(`MERGE (n:Entity {name: $name})`, { name: e });
+      await session.run(
+        `MERGE (n:Entity {name: $name, embedding: $embedding})`,
+        { name: e, embedding }
+      );
     }
     for (const r of relations) {
       await session.run(
@@ -77,135 +196,40 @@ async function ingestDocument(docId: string, text: string) {
   } finally {
     await session.close();
   }
-
-  console.log(`✅ Ingested: ${docId}`);
-}
-
-// Ingestione mini dataset
-async function runIngestion() {
-  await ingestDocument(
-    "doc1",
-    "Albert Einstein was a physicist who developed the theory of relativity."
-  );
-  await ingestDocument(
-    "doc2",
-    "Marie Curie discovered radium and polonium, and conducted pioneering research on radioactivity."
-  );
-  await ingestDocument(
-    "doc3",
-    "Isaac Newton formulated the laws of motion and universal gravitation."
-  );
-  console.log("📥 Dataset ingestito!");
 }
 
 // -------------------------------
-// 🔎 HYBRID RETRIEVER
-// -------------------------------
-const vectorRetriever = defineFirestoreRetriever(ai, {
-  name: "myVectorRetriever",
-  firestore,                  // 🔹 Aggiungi questa riga!
-  collection: "documentsCollection",
-  contentField: "text",
-  vectorField: "embedding",
-  embedder: textEmbeddingGecko001,
-  distanceMeasure: "COSINE",
-});
-
-
-async function graphQuery(query: string, k: number) {
-  const session = driver.session();
-  const result = await session.run(
-    `
-    MATCH (e:Entity)-[r]->(n)
-    WHERE e.name CONTAINS $q
-    RETURN n.text as text, properties(n) as metadata
-    LIMIT $limit
-    `,
-    { q: query, limit: k }
-  );
-  await session.close();
-
-  return result.records.map((rec) => ({
-    text: rec.get("text"),
-    metadata: rec.get("metadata"),
-  }));
-}
-
-const hybridRetriever = ai.defineSimpleRetriever(
-  {
-    name: "hybridRetriever",
-    configSchema: z
-      .object({
-        kVector: z.number().optional(),
-        kGraph: z.number().optional(),
-        kTotal: z.number().optional(),
-      })
-      .optional(),
-    content: "text",
-    metadata: ["source", "score"],
-  },
-  async (input, config) => {
-    const q = input.text;
-    const kVector = config?.kVector ?? 2;
-    const kGraph = config?.kGraph ?? 2;
-
-    const vectorDocs = await ai.retrieve({
-      retriever: vectorRetriever,
-      query: q,
-      options: { k: kVector },
-    });
-
-    const graphDocs = await graphQuery(q, kGraph);
-
-    const merged = [
-      ...vectorDocs.map((doc) => ({
-        text: doc.content,
-        metadata: { source: "vector", ...doc.metadata },
-      })),
-      ...graphDocs.map((d) => ({
-        text: d.text,
-        metadata: { source: "graph", ...d.metadata },
-      })),
-    ];
-
-    const kTotal = config?.kTotal ?? merged.length;
-    return merged.slice(0, kTotal);
-  }
-);
-
-// -------------------------------
-// 🤖 QUERY
+// 🔎 QUERY
 // -------------------------------
 async function ask(query: string) {
   const docs = await ai.retrieve({
-    retriever: hybridRetriever,
-    query: query,
-    options: { kVector: 3, kGraph: 3, kTotal: 5 },
-  });
-
-  const { text } = await ai.generate({
-    model: gemini15Pro,
-    prompt: `
-      Rispondi alla domanda usando SOLO queste informazioni:
-      ${docs.map((d) => d.text).join("\n\n")}
-      
-      Domanda: ${query}
-    `,
+    retriever: RETRIEVER_REF,
+    query,
   });
 
   console.log("\n❓ Domanda:", query);
-  console.log("💡 Risposta:", text);
+  console.log("💡 Documenti trovati:", docs.map((d) => d.text));
 }
 
 // -------------------------------
 // 🚀 MAIN
 // -------------------------------
 async function main() {
-  await runIngestion();
-  await ask("Chi ha scoperto la teoria della relatività?");
-  await ask("Chi ha fatto ricerca sulla radioattività?");
-  await ask("Chi ha formulato le leggi del moto?");
-  process.exit(0);
+  await ingestDocument(
+    "Albert Einstein was a physicist who developed the theory of relativity."
+  );
+  await ingestDocument(
+    "Marie Curie discovered radium and polonium, and conducted pioneering research on radioactivity."
+  );
+  await ingestDocument(
+    "Isaac Newton formulated the laws of motion and universal gravitation."
+  );
+
+  await ask("Einstein");
+  await ask("Curie");
+  await ask("Newton");
+
+  await driver.close();
 }
 
-main();
+main().catch(console.error);
