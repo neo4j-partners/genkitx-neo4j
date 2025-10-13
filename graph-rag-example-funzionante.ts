@@ -1,7 +1,6 @@
 import { genkit, Document } from "genkit";
 import neo4j from "neo4j-driver";
 import { z } from "zod";
-import { googleAI } from '@genkit-ai/googleai';
 
 // -------------------------------
 // 🔹 INIT
@@ -16,11 +15,7 @@ console.log("✅ Neo4j driver initialized");
 // -------------------------------
 // 🔹 Mock Embedder
 // -------------------------------
-const ai = genkit({
-    plugins: [
-        googleAI()
-    ]
-});
+const ai = genkit({});
 console.log("✅ Genkit initialized");
 
 const mockEmbedder = ai.defineEmbedder(
@@ -171,22 +166,16 @@ const hybridRetriever = ai.defineSimpleRetriever(
     const kVector = config?.kVector ?? 2;
     const kGraph = config?.kGraph ?? 2;
 
-    // TODO
-    // TODO
-    // TODO
-    // TODO
-    // TODO - MA RETRIEVER MI METTE L'EMBEDDER.....????????!!!!!!!
-    // TODO
     // Vector retrieval
-    const vectorDocsRaw = await ai.retrieve({
-      retriever: googleAI.embedder('gemini-embedding-001'),
-      input: inputs, // <-- passa gli oggetti Document
-      query: { content: inputs.flatMap(d => d.content) }, // schema corretto
-      options: { k: kVector },
-    });
-    console.log("🔹 Vector retrieval raw:", vectorDocsRaw);
+    // const vectorDocsRaw = await ai.retrieve({
+    //   retriever: mockEmbedder,
+    //   input: inputs, // <-- passa gli oggetti Document
+    //   query: { content: inputs.flatMap(d => d.content) }, // schema corretto
+    //   options: { k: kVector },
+    // });
+    // console.log("🔹 Vector retrieval raw:", vectorDocsRaw);
 
-    const vectorDocs = vectorDocsRaw.map((d: any) => ({
+    const vectorDocs = inputs.map((d: any) => ({
       text: q,
       metadata: { source: "vector" },
     }));
