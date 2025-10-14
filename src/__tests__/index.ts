@@ -1,5 +1,6 @@
 
 // TODO ---> https://github.com/langchain4j/langchain4j-community/pull/147/files#diff-88eda01fc3b9783cb9d21927a503fe236ed6f4de13e4fc314320736cd52d0150
+  // https://github.com/vga91/langchain4j-community/blob/5079cea64e42fd6cd326a45678da533d6a8c0438/embedding-stores/langchain4j-community-neo4j/src/main/java/dev/langchain4j/community/store/embedding/neo4j/Neo4jEmbeddingStore.java
 // TODO --> https://genkit.dev/docs/rag/#embedders
 
 
@@ -116,6 +117,16 @@ describe('Neo4j Plugin Integration', () => {
 
   // todo - TESTS
 
+  test('graph rag', async () => {
+      // TODO - create ingestor, 
+      // TODO - create indexer
+      const uniqueId = `test-doc-${Date.now()}`;
+      const newDocument = new Document({
+        content: [
+          { text: 'This is a test document for indexing and retrieval.' }
+        ],
+        metadata: { uniqueId },
+      });
 
   // --- Integration Tests ---
 

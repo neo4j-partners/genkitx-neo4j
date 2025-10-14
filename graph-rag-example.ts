@@ -1,157 +1,105 @@
 import { genkit, Document } from "genkit";
 import { googleAI } from "@genkit-ai/googleai";
-import neo4j from "neo4j-driver";
 import { z } from "zod";
+import {
+  neo4j,
+  neo4jIndexerRef,
+  neo4jRetrieverRef,
+} from "./src";
 
 // -------------------------------
-// 🔹 INIT
+// 🔹 INIT Genkit con plugin Neo4j
 // -------------------------------
-console.log("🚀 Starting Neo4j GraphRAG with Genkit...");
+console.log("🚀 Initializing Genkit with GoogleAI + Neo4j plugin...");
 
-const driver = neo4j.driver(
-  "bolt://localhost:7689",
-  neo4j.auth.basic("neo4j", "apoc12345")
-);
-
+// 
+// 
+// 
+// 
+// TODO - andrebbe un altro plugin separato che richiama embedding??
+// TODO - no, forse metto giusto un retriever richiamabile dentro il plugin??
+// 
 const ai = genkit({
-  plugins: [googleAI()],
+  plugins: [
+    googleAI(),
+    neo4j([
+      {
+        // retriever: QUI METTO IL RETRIEVER RICHIAMABILE PER LA RAG
+        indexId: "my-graph-index",
+        embedder: googleAI.embedder("text-embedding-004"),
+        retrievalQuery: `
+          MATCH (e:Entity)-[r]->(n)
+          WHERE e.name CONTAINS $q
+          RETURN n.name as text, properties(n) as metadata
+          LIMIT $limit
+        `,
+        creationQuery: 'CREATE (N)',
+        clientParams: {
+          url: process.env.NEO4J_URI as string,
+          username: process.env.NEO4J_USERNAME as string,
+          password: process.env.NEO4J_PASSWORD as string,
+          database: process.env.NEO4J_DATABASE ?? "neo4j",
+        },
+      },
+    ]),
+  ],
 });
 
-console.log("✅ Genkit + Neo4j initialized");
+console.log("✅ Genkit initialized with Neo4j index 'my-graph-index'");
 
 // -------------------------------
-// 🔹 Embedder (mock)
+// 🔹 INDEXER / RETRIEVER REFERENCES
 // -------------------------------
-const mockEmbedder = ai.defineEmbedder(
-  {
-    name: "mock-embedder",
-    info: { label: "Mock Embedder", dimensions: 10 },
-  },
-  async (documents: Document[]) => {
-    const embeddings = documents.map((doc) => {
-      const text = doc.content.map((block) => block.text).join(" ");
-      const vector = Array.from({ length: 10 }, (_, i) =>
-        Math.sin(text.charCodeAt(0) + i)
-      );
-      return { embedding: vector, metadata: { source: "mock" } };
-    });
-    return { embeddings };
-  }
-);
-
-// -------------------------------
-// 🔹 Ingestion
-// -------------------------------
-async function ingestDocument(docId: string, text: string) {
-  console.log(`\n📥 Ingesting: ${docId}`);
-  const result = await ai.embed({
-    embedder: mockEmbedder,
-    content: text,
-  });
-
-  const embedding = result[0].embedding;
-  const entities = text.match(/\b[A-Z][a-z]+\b/g) || [];
-
-  const relations = entities.slice(0, -1).map((e, i) => ({
-    from: e,
-    to: entities[i + 1],
-    type: "related",
-  }));
-
-  const session = driver.session();
-  try {
-    for (const e of entities) {
-      await session.run(`MERGE (n:Entity {name: $name})`, { name: e });
-    }
-    for (const r of relations) {
-      await session.run(
-        `
-        MATCH (a:Entity {name: $from}), (b:Entity {name: $to})
-        MERGE (a)-[:REL {type: $type}]->(b)
-        `,
-        r
-      );
-    }
-  } finally {
-    await session.close();
-  }
-
-  console.log(`✅ Ingested: ${docId} (Entities: ${entities.join(", ")})`);
-}
-
-async function runIngestion() {
-  console.log("📥 Running ingestion dataset...");
-  await ingestDocument(
-    "doc1",
-    "Albert Einstein was a physicist who developed the theory of relativity."
-  );
-  await ingestDocument(
-    "doc2",
-    "Marie Curie discovered radium and polonium, and conducted pioneering research on radioactivity."
-  );
-  await ingestDocument(
-    "doc3",
-    "Isaac Newton formulated the laws of motion and universal gravitation."
-  );
-  console.log("✅ Dataset ingested.");
-}
-
-// -------------------------------
-// 🔹 Neo4j Retriever
-// -------------------------------
-async function neo4jRetriever(query: string, k = 5) {
-  const session = driver.session();
-  const limit = neo4j.int(k);
-
-  const result = await session.run(
-    `
+export const myNeo4jIndexer = neo4jIndexerRef({ indexId: "my-graph-index" });
+export const myNeo4jRetriever = neo4jRetrieverRef({
+  indexId: "my-graph-index",
+  retrievalQuery: `
     MATCH (e:Entity)-[r]->(n)
     WHERE e.name CONTAINS $q
     RETURN n.name as text, properties(n) as metadata
     LIMIT $limit
-    `,
-    { q: query, limit }
-  );
-  await session.close();
+  `,
+});
 
-  const docs = result.records.map((rec) => ({
-    text: rec.get("text"),
-    metadata: rec.get("metadata"),
-  }));
+// -------------------------------
+// 📥 INGEST / INDEXING
+// -------------------------------
+async function runIngestion() {
+  console.log("\n🚀 Starting dataset ingestion...");
 
-  console.log("🟢 Neo4jRetriever Results:", docs);
-  return docs;
+  const docs = [
+    new Document({
+      content: [
+        { text: "Albert Einstein was a physicist who developed the theory of relativity." }
+      ],
+      metadata: { uniqueId: "doc1" },
+    }),
+    new Document({
+      content: [
+        { text: "Marie Curie discovered radium and polonium, and conducted pioneering research on radioactivity." }
+      ],
+      metadata: { uniqueId: "doc2" },
+    }),
+    new Document({
+      content: [
+        { text: "Isaac Newton formulated the laws of motion and universal gravitation." }
+      ],
+      metadata: { uniqueId: "doc3" },
+    }),
+  ];
+
+  console.log(`⚙️ Sending all ${docs.length} documents to Neo4j indexer at once...`);
+  await ai.index({
+    indexer: myNeo4jIndexer,
+    documents: docs,
+  });
+
+  console.log(`✅ All ${docs.length} documents indexed in Neo4j.`);
 }
 
-// -------------------------------
-// 🔹 Define Retriever Component
-// -------------------------------
-const graphRetriever = ai.defineSimpleRetriever(
-  {
-    name: "graph-retriever",
-    configSchema: z
-      .object({
-        k: z.number().default(3),
-      })
-      .optional(),
-    content: "text",
-    metadata: ["source"],
-  },
-  async (input: Document | Document[], config) => {
-    const query = Array.isArray(input)
-      ? input.map((d) => d.content.map((b) => b.text).join(" ")).join(" ")
-      : input.content.map((b) => b.text).join(" ");
-
-    const k = config?.k ?? 3;
-    const docs = await neo4jRetriever(query, k);
-    return docs.map(
-      (d) => new Document({ content: [{ text: d.text }], metadata: d.metadata })
-    );
-  }
-);
 
 // -------------------------------
-// 🔹 Define Flow (RAG)
+// 🔎 DEFINE FLOW (GRAPH RAG)
 // -------------------------------
 export const graphRagFlow = ai.defineFlow(
   {
@@ -160,30 +108,45 @@ export const graphRagFlow = ai.defineFlow(
     outputSchema: z.string(),
   },
   async (input) => {
-    const queryDoc = new Document({ content: [{ text: input.query }] });
+    console.log("\n🔍 [FLOW] Starting GraphRAG flow for query:", input.query);
 
-    // Step 1: Retrieve from Neo4j
+    // Step 1️⃣ — Retrieval
+    console.log("🔎 Retrieving relevant nodes from Neo4j via retriever...");
     const retrievedDocs = await ai.retrieve({
-      retriever: graphRetriever,
-      input: [queryDoc],
-      query: { content: [{ text: input.query }] },
-      options: { k: 3 },
+      retriever: myNeo4jRetriever,
+      query: input.query,
+      options: { k: 5 },
     });
 
-    const contextText = retrievedDocs.map((d) => d.text).join("\n");
+    if (retrievedDocs.length === 0) {
+      console.warn("⚠️ No documents retrieved for:", input.query);
+      return "No relevant information found in the Neo4j knowledge graph.";
+    }
 
-    // Step 2: Generate answer with context
+    console.log(`📚 Retrieved ${retrievedDocs.length} documents from Neo4j:`);
+    retrievedDocs.forEach((d, i) => {
+      console.log(`   ${i + 1}. "${d.text}"`);
+    });
+
+    const context = retrievedDocs.map((d) => d.text).join("\n---\n");
+
+    // Step 2️⃣ — Generation
+    console.log("\n🧠 Sending context to LLM (Gemini) for answer generation...");
     const response = await ai.generate({
-      model: "googleai/gemini-2.0-flash",
+      model: "googleai/gemini-1.5-flash",
       prompt: `
-You are a helpful assistant. 
-Answer the question based on the following context:
+You are a helpful assistant.
+Answer the following question using ONLY the context provided.
 
-${contextText}
+Context:
+${context}
 
 Question: ${input.query}
       `,
     });
+
+    console.log("💡 Model response received:");
+    console.log(response.text);
 
     return response.text;
   }
@@ -193,17 +156,25 @@ Question: ${input.query}
 // 🚀 MAIN
 // -------------------------------
 async function main() {
+  console.log("🟢 Starting GraphRAG main execution...");
+
+  // Step 1 — Ingestion
   await runIngestion();
 
-  const questions = ["Albert", "Marie", "Isaac"];
-  for (const q of questions) {
-    console.log(`\n❓ Asking: ${q}`);
-    const answer = await graphRagFlow({ query: q });
-    console.log(`💬 Answer: ${answer}`);
+  // Step 2 — Run Queries
+  const queries = ["Albert", "Marie", "Isaac"];
+  for (const q of queries) {
+    console.log("\n==========================================");
+    console.log(`❓ Running RAG flow for: "${q}"`);
+    const ans = await graphRagFlow({ query: q });
+    console.log(`💬 Final Answer for "${q}":`);
+    console.log(ans);
   }
 
-  await driver.close();
-  console.log("✅ Neo4j driver closed. Done!");
+  console.log("\n🏁 All queries processed successfully!");
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error("❌ Error in main execution:", err);
+  process.exit(1);
+});

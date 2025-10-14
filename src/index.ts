@@ -55,6 +55,7 @@ If not specified, the default label will be `Neo4j - <indexId>`
 export const neo4jRetrieverRef = (params: {
   indexId: string;
   displayName?: string;
+  retrievalQuery?: string;
 }) => {
   return retrieverRef({
     name: `neo4j/${params.indexId}`,
@@ -76,6 +77,7 @@ If not specified, the default label will be `Neo4j - <indexId>`
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
+  creationQuery?: string;
 }) => {
   return indexerRef({
     name: `neo4j/${params.indexId}`,
@@ -137,7 +139,7 @@ export function configureNeo4jRetriever<
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
 ) {
-  const { indexId, embedder, embedderOptions } = {
+  const { indexId, embedder, embedderOptions, retrievalQuery } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
@@ -201,6 +203,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   
   const retrievalQuery = `RETURN node.${textProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
+  console.log('retrievalQuery', retrievalQuery)
 
   if (filter == null) {
     return {query: `
@@ -260,6 +263,7 @@ export function configureNeo4jIndexer<
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
+  console.log('opening..')
   const neo4j_instance = neo4j_driver.driver(
     neo4jConfig.url, // URL (protocol://host:port)
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password), // Authentication
@@ -300,8 +304,7 @@ export function configureNeo4jIndexer<
 
         const createOrMerge = `CREATE (t:\`${labelName}\` {${idProperty}: row.id})`;
 
-        await neo4j_instance.executeQuery(
-          `
+        const creationQuery = params?.creationQuery ?? `
           UNWIND $data AS row
           ${createOrMerge}
           SET t.${textProperty} = row.text,
@@ -322,6 +325,8 @@ export function configureNeo4jIndexer<
         { indexName: indexId },
         { database: neo4jConfig.database },
       );
+
+      console.log('closing..')
       neo4j_instance.close();
     },
   );
