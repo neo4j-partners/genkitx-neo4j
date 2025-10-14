@@ -1,3 +1,9 @@
+
+// TODO ---> https://github.com/langchain4j/langchain4j-community/pull/147/files#diff-88eda01fc3b9783cb9d21927a503fe236ed6f4de13e4fc314320736cd52d0150
+// TODO --> https://genkit.dev/docs/rag/#embedders
+
+
+
 import { googleAI } from '@genkit-ai/googleai';
 import { Document, genkit } from 'genkit';
 import { test, describe, expect, afterAll, beforeAll, beforeEach, afterEach } from '@jest/globals';
@@ -5,10 +11,15 @@ import { Driver, auth, driver as neo4jDriver, Session } from 'neo4j-driver';
 // Imports necessary functions and references from the neo4j plugin
 import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
 
+
+
+
+
+
 /**
  * This file contains integration tests for the Genkit Neo4j plugin.
  * To run these tests, ensure the following environment variables are set:
- * - NEO4J_URI: The URI of the Neo4j instance (e.g., bolt://localhost:7687)
+ * - NEO4J_URI: The URI of the Neo4j instance (e.g., bolt://localhost:7689)
  * - NEO4J_USERNAME: The username for Neo4j authentication
  * - NEO4J_PASSWORD: The password for Neo4j authentication
  * - GEMINI_API_KEY: Your Google Gemini API key

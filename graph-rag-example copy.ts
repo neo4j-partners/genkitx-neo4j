@@ -81,7 +81,7 @@ const ai = genkit({
 // 🔹 Neo4j
 // -------------------------------
 const driver = neo4j.driver(
-  "bolt://localhost:7687",
+  "bolt://localhost:7689",
   neo4j.auth.basic("neo4j", "apoc12345")
 );
 
