@@ -1,23 +1,22 @@
-import { Genkit, Document, z } from "genkit";
-//import { neo4jIndexerRef, Neo4jGraphConfig } from "./neo4j-plugin"; // adjust import path
+import { genkit, Document } from "genkit";
 import { v4 as uuidv4 } from "uuid";
 import * as neo4j_driver from "neo4j-driver";
 import { Neo4jGraphConfig } from "genkitx-neo4j";
-import { neo4jIndexerRef } from ".";
+import { neo4jIndexerRef } from "."; // adjust import path
 
 /**
  * Base class for Neo4j RAG retrievers
  */
 export abstract class BaseNeo4jGraphRagRetriever {
   constructor(
-    protected ai: Genkit,
+    protected ai: ReturnType<typeof genkit>,
     protected neo4jConfig: Neo4jGraphConfig,
-    protected indexerRef: ReturnType<typeof neo4jIndexerRef>,
-    protected embedder: any,
-    protected embedderOptions?: any
+    protected indexerRef: ReturnType<typeof neo4jIndexerRef>
   ) {}
 
-  abstract ingestDocument(params: { documents: { id?: string; text: string; metadata?: any }[] }): Promise<any>;
+  abstract ingestDocument(params: {
+    documents: { id?: string; text: string; metadata?: any }[];
+  }): Promise<any>;
   abstract getRetrievalQuery(): string;
   abstract getPrompt(): string;
 
@@ -33,7 +32,11 @@ export abstract class BaseNeo4jGraphRagRetriever {
  * Parent-Child Retriever
  */
 export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
-  async ingestDocument({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) {
+  async ingestDocument({
+    documents,
+  }: {
+    documents: { id?: string; text: string; metadata?: any }[];
+  }) {
     // Lazy import of llm-chunk
     let chunk: any;
     try {
@@ -60,20 +63,17 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
 
       for (const chunkText of chunks) {
         const chunkId = uuidv4();
-        const subChunks = await chunk(chunkText, { ...chunkingConfig, minLength: 300, maxLength: 500, overlap: 50 });
+        const subChunks = await chunk(chunkText, {
+          ...chunkingConfig,
+          minLength: 300,
+          maxLength: 500,
+          overlap: 50,
+        });
 
-        // Index subchunks via Genkit
-        const documentsToIndex = await Promise.all(
-          subChunks.map(async (sub) => {
-            const embedding = await this.ai.embed({
-              embedder: this.embedder,
-              content: sub,
-              options: this.embedderOptions,
-            });
-            return new Document({ content: [{ text: sub }], metadata: {}, embedding });
-          })
+        // Index subchunks via Genkit + plugin embedder
+        const documentsToIndex = subChunks.map(
+          (sub) => new Document({ content: [{ text: sub }], metadata: doc.metadata ?? {} })
         );
-
         await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
 
         // Create parent-child structure in Neo4j
@@ -120,20 +120,17 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
  * Hypothetical Question Retriever
  */
 export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
-  async ingestDocument({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) {
+  async ingestDocument({
+    documents,
+  }: {
+    documents: { id?: string; text: string; metadata?: any }[];
+  }) {
     const session = this.getNeo4jInstance().session();
 
-    const documentsToIndex = await Promise.all(
-      documents.map(async (doc) => {
-        const embedding = await this.ai.embed({
-          embedder: this.embedder,
-          content: doc.text,
-          options: this.embedderOptions,
-        });
-        return new Document({ content: [{ text: doc.text }], metadata: doc.metadata ?? {}, embedding });
-      })
+    // Index documents via Genkit + plugin embedder
+    const documentsToIndex = documents.map(
+      (doc) => new Document({ content: [{ text: doc.text }], metadata: doc.metadata ?? {} })
     );
-
     await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
 
     // In Neo4j, just store documents as nodes (no subchunk logic)

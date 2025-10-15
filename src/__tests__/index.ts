@@ -7,14 +7,9 @@
 
 import { googleAI } from '@genkit-ai/googleai';
 import { Document, genkit } from 'genkit';
-import { test, describe, expect, afterAll, beforeAll, beforeEach, afterEach } from '@jest/globals';
-import { Driver, auth, driver as neo4jDriver, Session } from 'neo4j-driver';
-// Imports necessary functions and references from the neo4j plugin
-import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
-
-
-
-
+import { test, describe, expect } from '@jest/globals';
+import neo4j, { Neo4jGraphConfig, neo4jIndexerRef, neo4jRetrieverRef } from '..';
+import { HypotheticalQuestionRetriever, ParentChildRetriever } from '../rag-utils';
 
 
 /**
@@ -27,6 +22,115 @@ import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
  *
  * The Neo4j instance must be running and accessible.
  */
+
+describe("Neo4j RAG Retrievers", () => {
+  const requiredVars = ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "GEMINI_API_KEY"];
+  const missingVars = requiredVars.filter((env) => !process.env[env]);
+  const canRunTest = missingVars.length === 0;
+
+  if (!canRunTest) {
+    console.warn("Skipping Neo4j integration tests due to missing environment variables.");
+    return;
+  }
+
+  let ai: ReturnType<typeof genkit>;
+  let indexer: ReturnType<typeof neo4jIndexerRef>;
+  const indexId = "genkit-test-index";
+  const clientParams: Neo4jGraphConfig = {
+    url: process.env.NEO4J_URI!,
+    username: process.env.NEO4J_USERNAME!,
+    password: process.env.NEO4J_PASSWORD!,
+    database: "neo4j",
+  };
+
+  beforeAll(() => {
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        // Neo4j plugin registers indexer internally
+        neo4j([
+          {
+            indexId,
+            embedder: googleAI.embedder("gemini-embedding-001"),
+            clientParams,
+          },
+        ]),
+      ],
+    });
+
+    indexer = neo4jIndexerRef({ indexId });
+  });
+
+  test("ParentChildRetriever ingests and retrieves subchunks", async () => {
+    const retriever = new ParentChildRetriever(ai, clientParams, indexer);
+
+    const uniqueId = `pc-doc-${Date.now()}`;
+    const docText =
+      "This is a test document for parent-child ingestion in Neo4j. It should be chunked and subchunked properly.";
+
+    await retriever.ingestDocument({ documents: [{ text: docText, metadata: { uniqueId } }] });
+
+    const session = retriever.getNeo4jInstance().session();
+    const result = await session.run(retriever.getRetrievalQuery());
+    const records = result.records;
+
+    expect(records.length).toBeGreaterThan(0);
+
+    const foundText = records
+      .flatMap((r) => r.get("subChunks") || [])
+      .map((s: any) => s.properties.text)
+      .join(" ");
+    expect(foundText).toContain("test document for parent-child");
+
+    await session.close();
+  });
+
+  test("HypotheticalQuestionRetriever ingests and retrieves documents", async () => {
+    const retriever = new HypotheticalQuestionRetriever(ai, clientParams, indexer);
+
+    const uniqueId = `hq-doc-${Date.now()}`;
+    const docText = "This is a test document for the hypothetical question retriever.";
+
+    await retriever.ingestDocument({ documents: [{ text: docText, metadata: { uniqueId } }] });
+
+    const session = retriever.getNeo4jInstance().session();
+    const result = await session.run(retriever.getRetrievalQuery());
+    const records = result.records;
+
+    expect(records.length).toBeGreaterThan(0);
+
+    const foundText = records.map((r) => r.get("d").properties.text).join(" ");
+    expect(foundText).toContain("hypothetical question retriever");
+
+    await session.close();
+  });
+
+  test("ParentChildRetriever indexing works with Genkit", async () => {
+    const retriever = new ParentChildRetriever(ai, clientParams, indexer);
+
+    const uniqueId = `pc-index-doc-${Date.now()}`;
+    const docText = "This document will be indexed in Genkit via ParentChildRetriever.";
+
+    await retriever.ingestDocument({ documents: [{ text: docText, metadata: { uniqueId } }] });
+
+    const retrieverRef = neo4jRetrieverRef({ indexId });
+    const results = await ai.retrieve({
+      retriever: retrieverRef,
+      query: "indexed in Genkit",
+      options: { k: 10, filter: { uniqueId } },
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content[0].text).toContain("indexed in Genkit");
+  });
+});
+
+
+
+
+
+
+
 describe('Neo4j Plugin Integration', () => {
   // --- Configuration and Environment Variables ---
   const requiredVars = ['NEO4J_URI', 'NEO4J_USERNAME', 'NEO4J_PASSWORD', 'GEMINI_API_KEY'];
