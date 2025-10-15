@@ -1,90 +1,163 @@
-import * as neo4j_driver from "neo4j-driver";
+import { Genkit, Document, z } from "genkit";
+//import { neo4jIndexerRef, Neo4jGraphConfig } from "./neo4j-plugin"; // adjust import path
 import { v4 as uuidv4 } from "uuid";
+import * as neo4j_driver from "neo4j-driver";
+import { Neo4jGraphConfig } from "genkitx-neo4j";
+import { neo4jIndexerRef } from ".";
 
-export interface ParentChildIngestorOptions {
-  embedder: any;
-  embedderOptions?: any;
-  neo4jInstance: neo4j_driver.Driver;
+/**
+ * Base class for Neo4j RAG retrievers
+ */
+export abstract class BaseNeo4jGraphRagRetriever {
+  constructor(
+    protected ai: Genkit,
+    protected neo4jConfig: Neo4jGraphConfig,
+    protected indexerRef: ReturnType<typeof neo4jIndexerRef>,
+    protected embedder: any,
+    protected embedderOptions?: any
+  ) {}
+
+  abstract ingestDocument(params: { documents: { id?: string; text: string; metadata?: any }[] }): Promise<any>;
+  abstract getRetrievalQuery(): string;
+  abstract getPrompt(): string;
+
+  public getNeo4jInstance() {
+    return neo4j_driver.driver(
+      this.neo4jConfig.url,
+      neo4j_driver.auth.basic(this.neo4jConfig.username, this.neo4jConfig.password)
+    );
+  }
 }
 
 /**
- * Ingest documents with parent → chunk → subchunk structure in Neo4j
- * @param options embedder, optional embedder options, and Neo4j instance
- * @param documents Array of documents to ingest
- * @returns status and count of ingested documents
+ * Parent-Child Retriever
  */
-export async function parentChildIngestor(
-  options: ParentChildIngestorOptions,
-  { documents }: { documents: { id?: string; text: string; metadata?: any }[] }
-): Promise<{ status: "ok"; count: number }> {
-  // Lazy import chunk with a clear error if missing
-  let chunk: any;
-  try {
-    ({ chunk } = await import("llm-chunk"));
-  } catch (err) {
-    throw new Error(
-      "The 'llm-chunk' package is not installed. " +
-        "To use the Parent-Child ingestor, install it with:\n\n" +
-        "npm install llm-chunk\n" +
-        "or\n" +
-        "yarn add llm-chunk"
-    );
-  }
-
-  const session = options.neo4jInstance.session();
-
-  const chunkingConfig = {
-    minLength: 1000,
-    maxLength: 2000,
-    splitter: "sentence",
-    overlap: 100,
-    delimiters: "",
-  } as any;
-
-  for (const doc of documents) {
-    const docId = doc.id ?? uuidv4();
-    const chunks = await chunk(doc.text, chunkingConfig);
-
-    for (const chunkText of chunks) {
-      const chunkId = uuidv4();
-      const subChunks = await chunk(chunkText, {
-        ...chunkingConfig,
-        minLength: 300,
-        maxLength: 500,
-        overlap: 50,
-      });
-
-      const embeddings = await Promise.all(
-        subChunks.map((s) => options.embedder.embed({ content: s, options: options.embedderOptions }))
+export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
+  async ingestDocument({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) {
+    // Lazy import of llm-chunk
+    let chunk: any;
+    try {
+      ({ chunk } = await import("llm-chunk"));
+    } catch (err) {
+      throw new Error(
+        "The 'llm-chunk' package is not installed. To use ParentChildRetriever, run:\n\nnpm install llm-chunk\nor\nyarn add llm-chunk"
       );
+    }
 
-      await session.run(
-        `
-        MERGE (d:Document {id: $docId})
-        ON CREATE SET d.createdAt = timestamp(), d.metadata = $metadata
-        MERGE (c:Chunk {id: $chunkId})
-        SET c.text = $chunkText
-        MERGE (d)-[:HAS_CHUNK]->(c)
-      `,
-        { docId, metadata: doc.metadata ?? {}, chunkId, chunkText }
-      );
+    const session = this.getNeo4jInstance().session();
 
-      for (let i = 0; i < subChunks.length; i++) {
-        const subId = uuidv4();
-        const embedding = embeddings[i][0].embedding;
-        await session.run(
-          `
-          MERGE (s:SubChunk {id: $subId})
-          SET s.text = $text, s.embedding = $embedding
-          MERGE (c:Chunk {id: $chunkId})
-          MERGE (c)-[:HAS_SUBCHUNK]->(s)
-        `,
-          { subId, text: subChunks[i], embedding, chunkId }
+    const chunkingConfig = {
+      minLength: 1000,
+      maxLength: 2000,
+      splitter: "sentence",
+      overlap: 100,
+      delimiters: "",
+    } as any;
+
+    for (const doc of documents) {
+      const docId = doc.id ?? uuidv4();
+      const chunks = await chunk(doc.text, chunkingConfig);
+
+      for (const chunkText of chunks) {
+        const chunkId = uuidv4();
+        const subChunks = await chunk(chunkText, { ...chunkingConfig, minLength: 300, maxLength: 500, overlap: 50 });
+
+        // Index subchunks via Genkit
+        const documentsToIndex = await Promise.all(
+          subChunks.map(async (sub) => {
+            const embedding = await this.ai.embed({
+              embedder: this.embedder,
+              content: sub,
+              options: this.embedderOptions,
+            });
+            return new Document({ content: [{ text: sub }], metadata: {}, embedding });
+          })
         );
+
+        await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
+
+        // Create parent-child structure in Neo4j
+        await session.run(
+          `MERGE (d:Document {id: $docId})
+           ON CREATE SET d.createdAt = timestamp(), d.metadata = $metadata
+           MERGE (c:Chunk {id: $chunkId})
+           SET c.text = $chunkText
+           MERGE (d)-[:HAS_CHUNK]->(c)`,
+          { docId, metadata: doc.metadata ?? {}, chunkId, chunkText }
+        );
+
+        for (const sub of subChunks) {
+          const subId = uuidv4();
+          await session.run(
+            `MERGE (s:SubChunk {id: $subId})
+             SET s.text = $text
+             MERGE (c:Chunk {id: $chunkId})
+             MERGE (c)-[:HAS_SUBCHUNK]->(s)`,
+            { subId, text: sub, chunkId }
+          );
+        }
       }
     }
+
+    await session.close();
+    return { status: "ok", count: documents.length };
   }
 
-  await session.close();
-  return { status: "ok", count: documents.length };
+  getRetrievalQuery(): string {
+    return `
+      MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
+      OPTIONAL MATCH (c)-[:HAS_SUBCHUNK]->(s:SubChunk)
+      RETURN d, c, collect(s) as subChunks
+    `;
+  }
+
+  getPrompt(): string {
+    return "Use the retrieved parent-child document structure to answer the question:";
+  }
+}
+
+/**
+ * Hypothetical Question Retriever
+ */
+export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
+  async ingestDocument({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) {
+    const session = this.getNeo4jInstance().session();
+
+    const documentsToIndex = await Promise.all(
+      documents.map(async (doc) => {
+        const embedding = await this.ai.embed({
+          embedder: this.embedder,
+          content: doc.text,
+          options: this.embedderOptions,
+        });
+        return new Document({ content: [{ text: doc.text }], metadata: doc.metadata ?? {}, embedding });
+      })
+    );
+
+    await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
+
+    // In Neo4j, just store documents as nodes (no subchunk logic)
+    for (const doc of documents) {
+      const docId = doc.id ?? uuidv4();
+      await session.run(
+        `MERGE (d:Document {id: $docId})
+         SET d.text = $text, d.metadata = $metadata`,
+        { docId, text: doc.text, metadata: doc.metadata ?? {} }
+      );
+    }
+
+    await session.close();
+    return { status: "ok", count: documents.length };
+  }
+
+  getRetrievalQuery(): string {
+    return `
+      MATCH (d:Document)
+      RETURN d
+    `;
+  }
+
+  getPrompt(): string {
+    return "Answer the question hypothetically based on the retrieved documents:";
+  }
 }

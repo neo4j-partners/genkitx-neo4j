@@ -115,6 +115,41 @@ describe('Neo4j Plugin Integration', () => {
     await driver.close();
   });
 
+  // test('should ingest documents using Parent-Child ingestor if plugin exists', async () => {
+  //   const uniqueId = `parent-child-doc-${Date.now()}`;
+  //   const docsToIngest = [
+  //     { text: 'Parent document text', metadata: { uniqueId } }
+  //   ];
+
+  //   let parentChildTool;
+  //   try {
+  //     parentChildTool = ai.run('neo4j/genkit-test-index/parentChildIngestor');
+  //   } catch (err) {
+  //     console.warn('Parent-Child ingestor plugin is not available, skipping test.');
+  //     return;
+  //   }
+
+  //   const res = await parentChildTool({ documents: docsToIngest });
+  //   expect(res.status).toBe('ok');
+  //   expect(res.count).toBeGreaterThanOrEqual(1);
+
+  //   // Optionally, retrieve and verify content if needed
+  //   const retriever = neo4jRetrieverRef({ indexId: 'genkit-test-index' });
+  //   const retrievedDocs = await ai.retrieve({
+  //     retriever,
+  //     query: 'Parent document text',
+  //     options: { k: 10, filter: { uniqueId } },
+  //   });
+
+  //   expect(retrievedDocs).toHaveLength(1);
+  //   expect(retrievedDocs[0].content[0].text).toContain('Parent document text');
+  // });
+
+  // test('Neo4j retriever can be defined', async () => {
+  //   const retriever = ai.retriever('neo4j/genkit-test-index');
+  //   expect(retriever).toBeDefined();
+  // });
+
   // todo - TESTS
 
   test('graph rag', async () => {
