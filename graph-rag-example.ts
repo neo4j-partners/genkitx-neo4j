@@ -24,7 +24,7 @@ const ai = genkit({
     googleAI(),
     neo4j([
       {
-        // retriever: QUI METTO IL RETRIEVER RICHIAMABILE PER LA RAG
+        // retriever: QUI METTO IL RETRIEVER RICHIAMABILE PER LA
         indexId: "my-graph-index",
         embedder: googleAI.embedder("text-embedding-004"),
         retrievalQuery: `
