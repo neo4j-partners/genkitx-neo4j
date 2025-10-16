@@ -7,6 +7,10 @@ import { googleAI } from '@genkit-ai/googleai';
 /*
 TODO:
 
+TODO: https://chatgpt.com/c/68ef5a46-e250-8332-a351-c5279173b004
+- THE TESTS FAIL
+
+
 https://github.com/firebase/genkit/blob/main/js/testapps/rag/src/simple-rag.ts#L74
 
 
