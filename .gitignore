@@ -3,5 +3,6 @@ src/*.js
 
 package-lock.json
 node_modules
-
+lib
+.vscode
 .env
