@@ -18,18 +18,20 @@ import * as neo4j_driver from "neo4j-driver";
 import { Genkit, z } from "genkit";
 import { GenkitPlugin, genkitPlugin } from "genkit/plugin";
 
-import { EmbedderArgument, Embedding } from "genkit/embedder";
+import { EmbedderArgument } from "genkit/embedder";
 import {
   CommonRetrieverOptionsSchema,
   Document,
   indexerRef,
   retrieverRef,
 } from "genkit/retriever";
+import { constructMetadataFilter } from "./filter-utils";
+
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-  k: z.number().max(1000),
-  // filter: z.record(z.string(), z.any()).optional(), later for metadata filtering
+  filter: z.record(z.string(), z.any()).optional(),
 });
+
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -154,17 +156,14 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = `
-        CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
-        RETURN node.text AS text, node {.*, text: Null,
-        embedding: Null, id: Null } AS metadata
-        `;
+      const retriever_query = retrieverQuery(options, indexId);
       const response = await neo4j_instance.executeQuery(
-        retriever_query,
+        retriever_query.query,
         {
           k: options.k,
           embedding: queryEmbeddings[0].embedding,
           index: indexId,
+          ...retriever_query.additionalParams
         },
         {
           database: neo4jConfig.database,
@@ -186,6 +185,56 @@ export function configureNeo4jRetriever<
     },
   );
 }
+
+const retrieverQuery = (options: {
+    filter?: Record<string, any> | undefined;
+    k?: number | undefined;
+  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
+  const filter = options.filter;
+
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const nodeLabel = indexId;
+  
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const embeddingNodeProperty = "embedding";
+
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
+  const textNodeProperty = "text";
+  
+  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/3
+  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
+      embedding: Null, id: Null } AS metadata`;
+
+  if (filter == null) {
+    return {query: `
+      CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
+      ${retrievalQuery}
+      `,
+      additionalParams: {}
+    };
+  }
+  
+  const baseIndexQuery = `
+    CYPHER runtime = parallel parallelRuntimeSupport=all 
+    MATCH (n:\`${nodeLabel}\`)
+    WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
+    // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
+    AND
+  `;
+
+  const baseCosineQuery = `
+    WITH n as node, vector.similarity.cosine(
+      n.\`${embeddingNodeProperty}\`,
+      $embedding
+    ) AS score ORDER BY score DESC LIMIT toInteger($k)
+  `;
+  const [fSnippets, fParams] = constructMetadataFilter(filter);
+
+  const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
+
+  return {query: indexQuery, additionalParams: fParams};
+}
+
 
 /**
  * Configures a Neo4j indexer.
