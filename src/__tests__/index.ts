@@ -39,10 +39,17 @@ describe('Neo4j Plugin Integration', () => {
   const RETRIEVER_REF = neo4jRetrieverRef({ indexId });
 
   // Cypher Cleanup Query: deletes all nodes with the test label
-  const CLEANUP_QUERY = `MATCH (n:${INDEX_LABEL}) DETACH DELETE n`;
+  const CLEANUP_QUERY = `MATCH (n) DETACH DELETE n`;
   // Cypher Verification Query: finds a node based on a unique ID
   const FIND_NODE_QUERY = `MATCH (n:${INDEX_LABEL} {uniqueId: $uniqueId}) RETURN n`;
 
+  // Configuration of Neo4j client connection parameters for the Genkit plugin
+  const clientParams = {
+      url: process.env.NEO4J_URI as string,
+      username: process.env.NEO4J_USERNAME as string,
+      password: process.env.NEO4J_PASSWORD as string,
+      database: 'neo4j',
+  };
   
   // --- Setup and Teardown ---
 
@@ -62,14 +69,6 @@ describe('Neo4j Plugin Integration', () => {
   beforeEach(async () => {
     if (!canRunTest) return;
 
-    // Configuration of Neo4j client connection parameters for the Genkit plugin
-    const clientParams = {
-        url: process.env.NEO4J_URI as string,
-        username: process.env.NEO4J_USERNAME as string,
-        password: process.env.NEO4J_PASSWORD as string,
-        database: 'neo4j',
-    };
-
     // Initializes Genkit with the Google AI plugin and the Neo4j plugin
     ai = genkit({
       plugins: [
@@ -83,7 +82,6 @@ describe('Neo4j Plugin Integration', () => {
         ]),
       ],
     });
-    
     // Opens a new Neo4j session for verification operations
     session = driver.session();
   });
@@ -148,6 +146,167 @@ describe('Neo4j Plugin Integration', () => {
     // 5. Retrieval Verification
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
+  });
+
+  test('should document and retrieve it with custom label', async () => {
+    const customLabel = 'customLabel'
+    const customLabelIdx = 'customLabelIdx'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customLabelIdx, // The index ID to configure
+            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
+            clientParams, // Neo4j connection parameters
+            label: customLabel
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customLabelIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customLabelIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+  });
+
+  test('should document and retrieve it with custom label and filter', async () => {
+    const customLabel = 'customLabel'
+    const customLabelIdx = 'customLabelIdx'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customLabelIdx, // The index ID to configure
+            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
+            clientParams, // Neo4j connection parameters
+            label: customLabel
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customLabelIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customLabelIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10,
+        filter: { uniqueId },
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+  });
+
+  test('should document and retrieve it with custom label, properties and filter', async () => {
+    const customLabel = 'customLabelEntities'
+    const customEntitiesIdx = 'customEntitiesIdx'
+    const customTextProperty = 'customTextProperty'
+    const customEmbeddingProperty = 'customEmbeddingProperty'
+    const customIdProperty = 'customIdProperty'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customEntitiesIdx, // The index ID to configure
+            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
+            clientParams, // Neo4j connection parameters
+            label: customLabel,
+            textProperty: customTextProperty,
+            embeddingProperty: customEmbeddingProperty,
+            idProperty: customIdProperty,
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customEntitiesIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customEntitiesIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10,
+        filter: { uniqueId },
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+
+    const props = result.records.map(r => Object.keys(r.get('n').properties));
+    expect(props).toEqual([[customEmbeddingProperty, customTextProperty, customIdProperty, 'uniqueId']])
   });
 
   runTest('should retrieve documents using a specific metadata filter', async () => {
