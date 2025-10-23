@@ -228,8 +228,6 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   const [fSnippets, fParams] = constructMetadataFilter(filter);
 
   const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
-  console.log('indexQuery', indexQuery)
-  console.log('fSnippets, fParams', fSnippets, fParams)
 
   return {query: indexQuery, additionalParams: fParams};
 }
