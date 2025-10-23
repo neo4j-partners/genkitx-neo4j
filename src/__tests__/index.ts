@@ -43,7 +43,6 @@ describe('Neo4j Plugin Integration', () => {
   // Cypher Verification Query: finds a node based on a unique ID
   const FIND_NODE_QUERY = `MATCH (n:${INDEX_LABEL} {uniqueId: $uniqueId}) RETURN n`;
 
-  // Configuration of Neo4j client connection parameters for the Genkit plugin
   const clientParams = {
       url: process.env.NEO4J_URI as string,
       username: process.env.NEO4J_USERNAME as string,
@@ -156,9 +155,9 @@ describe('Neo4j Plugin Integration', () => {
         googleAI(),
         neo4j([
           {
-            indexId: customLabelIdx, // The index ID to configure
-            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
-            clientParams, // Neo4j connection parameters
+            indexId: customLabelIdx,
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams,
             label: customLabel
           },
         ]),
@@ -206,9 +205,9 @@ describe('Neo4j Plugin Integration', () => {
         googleAI(),
         neo4j([
           {
-            indexId: customLabelIdx, // The index ID to configure
-            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
-            clientParams, // Neo4j connection parameters
+            indexId: customLabelIdx, 
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams, 
             label: customLabel
           },
         ]),
@@ -260,9 +259,9 @@ describe('Neo4j Plugin Integration', () => {
         googleAI(),
         neo4j([
           {
-            indexId: customEntitiesIdx, // The index ID to configure
-            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
-            clientParams, // Neo4j connection parameters
+            indexId: customEntitiesIdx, 
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams, 
             label: customLabel,
             textProperty: customTextProperty,
             embeddingProperty: customEmbeddingProperty,

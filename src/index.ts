@@ -26,7 +26,6 @@ import {
   retrieverRef,
 } from "genkit/retriever";
 import { constructMetadataFilter } from "./filter-utils";
-import { uuid } from "zod/v4";
 
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
