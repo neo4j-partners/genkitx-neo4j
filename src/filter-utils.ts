@@ -157,7 +157,7 @@ function handleFieldFilter(
       const queryParam = { [`param_${paramNumber}`]: filterValue };
       return [querySnippet, queryParam];
     } else if (operator === "$nin") {
-      const querySnippet = `n.${field} NOT IN $param_${paramNumber}`;
+      const querySnippet = `NOT n.${field} IN $param_${paramNumber}`;
       const queryParam = { [`param_${paramNumber}`]: filterValue };
       return [querySnippet, queryParam];
     } else if (operator === "$like") {
@@ -165,7 +165,7 @@ function handleFieldFilter(
       const queryParam = { [`param_${paramNumber}`]: filterValue.slice(0, -1) };
       return [querySnippet, queryParam];
     } else if (operator === "$ilike") {
-      const querySnippet = `toLower(n.${field}) CONTAINS $param_${paramNumber}`;
+      const querySnippet = `toLower(n.${field}) CONTAINS toLower($param_${paramNumber})`;
       const queryParam = { [`param_${paramNumber}`]: filterValue.slice(0, -1) };
       return [querySnippet, queryParam];
     } else {
