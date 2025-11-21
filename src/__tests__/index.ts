@@ -6,6 +6,7 @@ import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
 
 // Import the Testcontainers equivalent for Node.js
 import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
+import { mockEmbedder } from '../dummyEmbedder';
 
 /**
  * This file contains integration tests for the Genkit Neo4j plugin,
@@ -13,11 +14,6 @@ import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
  * for each test run.
  */
 describe('Neo4j Plugin Integration', () => {
-  // We only require the GEMINI_API_KEY; all Neo4j connection details are dynamic.
-  const requiredVars = ['GEMINI_API_KEY'];
-  const missingVars = requiredVars.filter(env => !process.env[env]);
-  const canRunTest = missingVars.length === 0;
-  const runTest = canRunTest ? test : test.skip;
   
   // Reference to the Testcontainers Neo4j instance
   let neo4jContainer: StartedNeo4jContainer;
@@ -27,8 +23,9 @@ describe('Neo4j Plugin Integration', () => {
   let driver: Driver;
   let session: Session;
 
-  // Index and query configuration constants
+  // Unique ID used for the vector index in Neo4j (corresponds to the node label)
   const indexId = 'genkit-test-index';
+  // Cypher Label for the node, quoted for safety
   const INDEX_LABEL = `\`${indexId}\``; 
   const INDEXER_REF = neo4jIndexerRef({ indexId });
   const RETRIEVER_REF = neo4jRetrieverRef({ indexId });
@@ -39,10 +36,6 @@ describe('Neo4j Plugin Integration', () => {
   // --- Setup and Teardown ---
 
   beforeAll(async () => {
-    if (!canRunTest) {
-        console.warn(`Skipping Neo4j tests: Missing environment variables: ${missingVars.join(', ')}`);
-        return;
-    }
 
     // 1. Start the Neo4j Docker container using Testcontainers.
     // This automatically pulls the image and waits for the database to be ready.
@@ -61,7 +54,6 @@ describe('Neo4j Plugin Integration', () => {
   }, 60000); // Increased timeout for container startup
 
   beforeEach(async () => {
-    if (!canRunTest) return;
 
     // 4. Configure the client with dynamic connection parameters from the container
     const clientParams = {
@@ -71,6 +63,7 @@ describe('Neo4j Plugin Integration', () => {
         database: 'neo4j',
     };
 
+
     // Initialize Genkit with dynamic parameters
     ai = genkit({
       plugins: [
@@ -78,7 +71,7 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId, 
-            embedder: googleAI.embedder('gemini-embedding-001'), 
+            embedder: mockEmbedder, 
             clientParams, 
           },
         ]),
@@ -90,7 +83,6 @@ describe('Neo4j Plugin Integration', () => {
   });
   
   afterEach(async () => {
-    if (!canRunTest) return;
     
     // Cleanup: deletes all test nodes
     try {
@@ -102,7 +94,6 @@ describe('Neo4j Plugin Integration', () => {
   });
 
   afterAll(async () => {
-    if (!canRunTest) return;
     // Close the global Neo4j driver
     await driver.close();
     
@@ -113,7 +104,7 @@ describe('Neo4j Plugin Integration', () => {
 
   // --- Integration Tests ---
 
-  runTest('should successfully index a document and verify node creation', async () => {
+  test('should successfully index a document and verify node creation', async () => {
     // 1. Data Setup
     const uniqueId = `test-doc-${Date.now()}`;
     const initialText = 'This is a test document for indexing and retrieval.';
@@ -154,7 +145,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
   });
 
-  runTest('should retrieve documents using a specific metadata filter', async () => {
+  test('should retrieve documents using a specific metadata filter', async () => {
     // 1. Data Setup
     const commonId = `common-doc-${Date.now()}`;
     const CAT_ANIMAL = 'cat';
@@ -204,7 +195,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(retrievedDocs.every(doc => doc.metadata?.animal === CAT_ANIMAL)).toBe(true);
   });
 
-  runTest('should return an empty array for a non-matching query', async () => {
+  test('should return an empty array for a non-matching query', async () => {
     // 1. Data Setup
     const uniqueId = `test-doc-${Date.now()}`;
     const newDocument = new Document({
