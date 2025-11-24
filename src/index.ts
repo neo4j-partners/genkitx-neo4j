@@ -18,7 +18,7 @@ import * as neo4j_driver from "neo4j-driver";
 import { Genkit, z } from "genkit";
 import { GenkitPlugin, genkitPlugin } from "genkit/plugin";
 
-import { EmbedderArgument, Embedding } from "genkit/embedder";
+import { EmbedderArgument } from "genkit/embedder";
 import {
   CommonRetrieverOptionsSchema,
   Document,
@@ -27,24 +27,11 @@ import {
 } from "genkit/retriever";
 import { constructMetadataFilter } from "./filter-utils";
 
-// const WhereSchema: z.ZodType<Where> = z.any();
-// const WhereDocumentSchema: z.ZodType<WhereDocument> = z.any();
-
-// const IncludeOptionSchema = z
-//   .array(z.enum(['documents', 'embeddings', 'metadatas', 'distances']))
-//   .optional();
-// type IncludeOption = z.infer<typeof IncludeOptionSchema>;
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-  // include: IncludeOptionSchema,
   filter: z.record(z.string(), z.any()).optional(),
-  // whereDocument: WhereDocumentSchema.optional(),
 });
 
-// const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-//   k: z.number().max(1000),
-//   where: z.record(z.string(), z.any()).optional(), // later for metadata filtering
-// });
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -89,7 +76,6 @@ If not specified, the default label will be `Neo4j - <indexId>`
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
-  a?: string;
 }) => {
   return indexerRef({
     name: `neo4j/${params.indexId}`,
@@ -104,7 +90,6 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   indexId: string;
   embedder: EmbedderArgument<EmbedderCustomOptions>;
   embedderOptions?: z.infer<EmbedderCustomOptions>;
-  // TODO - common interface
   clientParams?: Neo4jGraphConfig;
   label?: string;
   textProperty?: string;
@@ -138,16 +123,6 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 
 export default neo4j;
 
-
-/*
-     * @param label: the optional label name (default: "Document")
-     * @param embeddingProperty: the optional embeddingProperty name (default: "embedding")
-     * @param idProperty: the optional id property name (default: "id")
-     * @param metadataPrefix: the optional metadata prefix (default: "")
-     * @param textProperty: the optional textProperty property name (default: "text")
-     * @param indexName: the optional index name (default: "vector")
-*/
-
 /**
  * Configures a Neo4j retriever.
  * @param ai A Genkit instance
@@ -165,7 +140,6 @@ export function configureNeo4jRetriever<
 >(
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
-  // b?: string
 ) {
   const { indexId, embedder, embedderOptions } = {
     ...params,
@@ -217,49 +191,20 @@ export function configureNeo4jRetriever<
   );
 }
 
-const retrieverQuery = (options: {
+const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
+  options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-    // TODO - create interface without embedderOptions etc..
-
-    
-  }, params: Neo4jParams<any>): {query: string, additionalParams: Record<string, any>} => {
+  },
+  params: Neo4jParams<EmbedderCustomOptions>
+): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
+  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text' } = params;
 
-  // const parallelQuery = // todo - this.isEnterprise
-  //       ? "CYPHER runtime = parallel parallelRuntimeSupport=all "
-  //       : "";
-  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
-
-
-  // TODO - commonize params?.embeddingProperty ?? "embedding" and indexer one, 
-  // etc..
-
-  // TODO - customize it
-  const nodeLabel = params?.label ?? params.indexId;
+  const nodeLabel = label || indexId;
   
-
-  // TODO - customize it
-  const embeddingNodeProperty = params?.embeddingProperty ?? "embedding";
-
-  // TODO - customize it
-  const textNodeProperty = params?.textProperty ?? "text";
-  const idNodeProperty = params?.textProperty ?? "id";
-  
-
-  // TODO - is wrong, return {text: null, embedding: null, ....} as metadata
-
-  /*
-        this.autoCreateFullText = autoCreateFullText;
-        this.fullTextIndexName = getOrDefault(fullTextIndexName, DEFAULT_FULLTEXT_IDX_NAME);
-        this.fullTextQuery = fullTextQuery;
-        this.fullTextRetrievalQuery = getOrDefault(fullTextRetrievalQuery, this.retrievalQuery);
-  */
-  
-
-  // TODO - customize it
-  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, ${textNodeProperty}: Null,
-      ${embeddingNodeProperty}: Null, ${idNodeProperty}: Null } AS metadata`;
+  const retrievalQuery = `RETURN node.${textProperty} AS text, node {.*, text: Null,
+      embedding: Null, id: Null } AS metadata`;
 
   const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
 
@@ -289,16 +234,15 @@ const retrieverQuery = (options: {
   }
   
   const baseIndexQuery = `
-    ${parallelQuery}
+    CYPHER runtime = parallel parallelRuntimeSupport=all 
     MATCH (n:\`${nodeLabel}\`)
-    WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
-    // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
+    WHERE n.\`${embeddingProperty}\` IS NOT NULL
     AND
   `;
 
   const baseCosineQuery = `
     WITH n as node, vector.similarity.cosine(
-      n.\`${embeddingNodeProperty}\`,
+      n.\`${embeddingProperty}\`,
       $embedding
     ) AS score ORDER BY score DESC LIMIT toInteger($k)
   `;
@@ -308,42 +252,6 @@ const retrieverQuery = (options: {
 
   return {query: indexQuery, additionalParams: fParams};
 }
-
-
-// TODO - add this
-// async _verifyVersion() {
-//     try {
-//       const data = await this.query("CALL dbms.components()");
-//       const versionString: string = data[0].versions[0];
-//       const targetVersion = [5, 11, 0];
-
-//       let version: number[];
-
-//       if (versionString.includes("aura")) {
-//         // Get the 'x.y.z' part before '-aura'
-//         const baseVersion = versionString.split("-")[0];
-//         version = baseVersion.split(".").map(Number);
-//         version.push(0);
-//       } else {
-//         version = versionString.split(".").map(Number);
-//       }
-
-//       if (isVersionLessThan(version, targetVersion)) {
-//         throw new Error(
-//           "Version index is only supported in Neo4j version 5.11 or greater"
-//         );
-//       }
-
-//       const metadataTargetVersion = [5, 18, 0];
-//       if (isVersionLessThan(version, metadataTargetVersion)) {
-//         this.supportMetadataFilter = false;
-//       }
-
-//       this.isEnterprise = data[0].edition === "enterprise";
-//     } catch (error) {
-//       console.error("Database version check failed:", error);
-//     }
-//   }
 
 
 /**
@@ -362,19 +270,14 @@ export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  // params: {
-  //   indexId: string;
-  //   clientParams?: Neo4jGraphConfig;
-  //   embedder: EmbedderArgument<EmbedderCustomOptions>;
-  //   embedderOptions?: z.infer<EmbedderCustomOptions>;
-  //   // TODO - FORSE QUI???
-  // },
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, embedder, embedderOptions, 
-    label, 
+  const { indexId, 
+    embedder, 
+    embedderOptions,
     embeddingProperty = 'embedding',
-    idProperty,
+    idProperty = 'id',
+    label, 
     textProperty = 'text',
     searchType = SearchType.vector,
   } = {
@@ -409,16 +312,16 @@ export function configureNeo4jIndexer<
         const batchDocs = docs.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
 
-        const batchParams = batchDocs.map((el, j) => ({
+        const batchParams = batchDocs.map((el, j) => {
+          return ({
           text: el.content[0]["text"],
           metadata: el.metadata ?? {},
-          // todo - change it???
           embedding: batchEmbeddings[j][0]["embedding"],
-        }));
+          id: el.content[0]["id"] || Date.now()
+        })
+      });
 
-        const createOrMerge = idProperty 
-          ? `MERGE (t:\`${labelName}\` {${idProperty}: row.id})`
-          : `CREATE (t:\`${labelName}\`)`;
+        const createOrMerge = `CREATE (t:\`${labelName}\` {${idProperty}: row.id})`;
 
         await neo4j_instance.executeQuery(
           `
