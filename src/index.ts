@@ -198,15 +198,9 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   const filter = options.filter;
   const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text' } = params;
 
-  const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
-
-  const nodeLabel = params?.indexId;
+  const nodeLabel = label || indexId;
   
-  const embeddingNodeProperty = "embedding";
-
-  const textNodeProperty = "text";
-  
-  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
+  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
 
   if (filter == null) {
