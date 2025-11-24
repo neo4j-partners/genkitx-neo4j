@@ -76,7 +76,6 @@ If not specified, the default label will be `Neo4j - <indexId>`
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
-  a?: string;
 }) => {
   return indexerRef({
     name: `neo4j/${params.indexId}`,
@@ -91,7 +90,6 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
     indexId: string;
     embedder: EmbedderArgument<EmbedderCustomOptions>;
     embedderOptions?: z.infer<EmbedderCustomOptions>;
-    // TODO - common interface
     clientParams?: Neo4jGraphConfig;
     label?: string;
     textProperty?: string;
@@ -121,16 +119,6 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 }
 
 export default neo4j;
-
-
-/*
-     * @param label: the optional label name (default: "Document")
-     * @param embeddingProperty: the optional embeddingProperty name (default: "embedding")
-     * @param idProperty: the optional id property name (default: "id")
-     * @param metadataPrefix: the optional metadata prefix (default: "")
-     * @param textProperty: the optional textProperty property name (default: "text")
-     * @param indexName: the optional index name (default: "vector")
-*/
 
 /**
  * Configures a Neo4j retriever.
@@ -200,11 +188,15 @@ export function configureNeo4jRetriever<
   );
 }
 
-const retrieverQuery = (options: {
+const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
+  options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-  }, params: any): {query: string, additionalParams: Record<string, any>} => {
+  },
+  params: Neo4jParams<EmbedderCustomOptions>
+): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
+  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text' } = params;
 
   const parallelQuery = "CYPHER runtime = parallel parallelRuntimeSupport=all ";
 
@@ -225,19 +217,17 @@ const retrieverQuery = (options: {
       additionalParams: {}
     };
   }
-
   
   const baseIndexQuery = `
     CYPHER runtime = parallel parallelRuntimeSupport=all 
     MATCH (n:\`${nodeLabel}\`)
-    WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
-    // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
+    WHERE n.\`${embeddingProperty}\` IS NOT NULL
     AND
   `;
 
   const baseCosineQuery = `
     WITH n as node, vector.similarity.cosine(
-      n.\`${embeddingNodeProperty}\`,
+      n.\`${embeddingProperty}\`,
       $embedding
     ) AS score ORDER BY score DESC LIMIT toInteger($k)
   `;
@@ -265,19 +255,14 @@ export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  // params: {
-  //   indexId: string;
-  //   clientParams?: Neo4jGraphConfig;
-  //   embedder: EmbedderArgument<EmbedderCustomOptions>;
-  //   embedderOptions?: z.infer<EmbedderCustomOptions>;
-  //   // TODO - FORSE QUI???
-  // },
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, embedder, embedderOptions, 
-    label, 
+  const { indexId, 
+    embedder, 
+    embedderOptions,
     embeddingProperty = 'embedding',
-    idProperty,
+    idProperty = 'id',
+    label, 
     textProperty = 'text' } = {
     ...params,
   };
@@ -302,6 +287,7 @@ export function configureNeo4jIndexer<
           }),
         ),
       );
+      console.log('embeddings', embeddings)
 
       const BATCH_SIZE = 1000;
       const labelName = label || indexId;
@@ -310,16 +296,16 @@ export function configureNeo4jIndexer<
         const batchDocs = docs.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
 
-        const batchParams = batchDocs.map((el, j) => ({
+        const batchParams = batchDocs.map((el, j) => {
+          return ({
           text: el.content[0]["text"],
           metadata: el.metadata ?? {},
-          // todo - change it???
           embedding: batchEmbeddings[j][0]["embedding"],
-        }));
+          id: el.content[0]["id"] || Date.now()
+        })
+      });
 
-        const createOrMerge = idProperty 
-          ? `MERGE (t:\`${labelName}\` {${idProperty}: row.id})`
-          : `CREATE (t:\`${labelName}\`)`;
+        const createOrMerge = `CREATE (t:\`${labelName}\` {${idProperty}: row.id})`;
 
         await neo4j_instance.executeQuery(
           `
