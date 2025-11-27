@@ -7,6 +7,7 @@ import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
 // Import the Testcontainers equivalent for Node.js
 import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
 import { mockEmbedder } from '../dummyEmbedder';
+import { Wait } from 'testcontainers';
 
 /**
  * This file contains integration tests for the Genkit Neo4j plugin,
@@ -39,7 +40,9 @@ describe('Neo4j Plugin Integration', () => {
 
     // 1. Start the Neo4j Docker container using Testcontainers.
     // This automatically pulls the image and waits for the database to be ready.
-    neo4jContainer = await new Neo4jContainer('neo4j:5.26.16').start();
+    neo4jContainer = await new Neo4jContainer('neo4j:5.26.16')
+      .withWaitStrategy(Wait.forLogMessage('Started.'))
+      .start();
     
     // 2. Get the dynamically generated connection parameters
     const uri = neo4jContainer.getBoltUri();
@@ -51,7 +54,7 @@ describe('Neo4j Plugin Integration', () => {
       uri,
       auth.basic(username, password),
     );
-  }, 60000); // Increased timeout for container startup
+  }, 120000);
 
   beforeEach(async () => {
 
