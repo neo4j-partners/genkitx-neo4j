@@ -77,7 +77,6 @@ describe('Neo4j Plugin Integration', () => {
             indexId, // The index ID to configure
             embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
             clientParams, // Neo4j connection parameters
-            retrievalQuery: ""
           },
         ]),
       ],
@@ -115,7 +114,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: initialText }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This is a test document to be indexed.';
+    const query = 'This is a test document to be indexed.';
 
     // 2. Action: Index the document
     // Uses the predefined indexer reference (INDEXER_REF)
@@ -136,7 +135,62 @@ describe('Neo4j Plugin Integration', () => {
     // Uses the predefined retriever reference (RETRIEVER_REF)
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
+      options: {
+        k: 10,
+        filter: { uniqueId }, // Filters by the unique ID to ensure a hit
+      },
+    });
+
+    // 5. Retrieval Verification
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+  });
+
+  runTest('should successfully index a document with a custom retrieval query and verify node creation', async () => {
+    // 1. Data Setup
+    const uniqueId = `test-doc-${Date.now()}`;
+    const initialText = 'This is a test document for indexing and retrieval.';
+    const newDocument = new Document({
+      content: [{ text: initialText }],
+      metadata: { uniqueId },
+    });
+    const query = 'This is a test document to be indexed.';
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId, // The index ID to configure
+            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
+            clientParams, 
+            retrievalQuery: "RETURN node.text AS text, 1 AS mockProp"
+          },
+        ]),
+      ],
+    });
+
+    // 2. Action: Index the document
+    // Uses the predefined indexer reference (INDEXER_REF)
+    await ai.index({ indexer: INDEXER_REF, documents: [newDocument] });
+
+    // 3. Neo4j Verification: ensure the node was created
+    const result = await session.run(
+      FIND_NODE_QUERY,
+      { uniqueId },
+    );
+    
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].get('n').properties.uniqueId).toBeNull();
+    // Verifies that the content was stored correctly
+    expect(result.records[0].get('n').properties.text).toBe(initialText);
+    expect(result.records[0].get('mockProp')).toBe(1);
+
+    // 4. Action: Retrieve the indexed document
+    // Uses the predefined retriever reference (RETRIEVER_REF)
+    const docs = await ai.retrieve({
+      retriever: RETRIEVER_REF,
+      query: query,
       options: {
         k: 10,
         filter: { uniqueId }, // Filters by the unique ID to ensure a hit
@@ -270,7 +324,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: initialText }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This is a test document to be indexed.';
+    const query = 'This is a test document to be indexed.';
 
     // 2. Action: Index the document
     // Uses the predefined indexer reference (INDEXER_REF)
@@ -291,7 +345,7 @@ describe('Neo4j Plugin Integration', () => {
     // Uses the predefined retriever reference (RETRIEVER_REF)
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         filter: { uniqueId }, // Filters by the unique ID to ensure a hit
@@ -329,7 +383,7 @@ describe('Neo4j Plugin Integration', () => {
             label: customLabel,
             textProperty: customTextProperty,
             embeddingProperty: customEmbeddingProperty,
-            idProperty: customIdProperty,
+            idProperty: customIdProperty
           },
         ]),
       ],
@@ -405,12 +459,12 @@ describe('Neo4j Plugin Integration', () => {
     expect(animals).toEqual(expect.arrayContaining([CAT_ANIMAL, CAT_ANIMAL, DOG_ANIMAL]));
 
     // 4. Action: Retrieve using a metadata filter
-    const retrievalQuery = 'What animal information is available?';
+    const query = 'What animal information is available?';
     const filter = { animal: CAT_ANIMAL, commonId };
 
     const retrievedDocs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         filter, // Apply the filter: should only retrieve "cat" documents
@@ -429,7 +483,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: 'This is a test document about technology.' }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This query should not find anything about animals.';
+    const query = 'This query should not find anything about animals.';
     const nonMatchingFilter = { nonExistentField: 'nonExistentValue' };
 
     // 2. Action: Index a document
@@ -445,7 +499,7 @@ describe('Neo4j Plugin Integration', () => {
     // 4. Action: Retrieve using a non-matching filter
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         // The filter does not match any property on the indexed nodes
@@ -490,12 +544,12 @@ describe('Neo4j Plugin Integration', () => {
     expect(animals).toEqual(expect.arrayContaining([CAT_ANIMAL, CAT_ANIMAL, DOG_ANIMAL]));
 
     // 4. Action: Retrieve using a metadata filter
-    const retrievalQuery = 'What animal information is available?';
+    const query = 'What animal information is available?';
     const filter = { animal: CAT_ANIMAL, commonId };
 
     const retrievedDocs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         filter, // Apply the filter: should only retrieve "cat" documents
@@ -514,7 +568,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: 'This is a test document about technology.' }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This query should not find anything about animals.';
+    const query = 'This query should not find anything about animals.';
     const nonMatchingFilter = { nonExistentField: 'nonExistentValue' };
 
     // 2. Action: Index a document
@@ -530,7 +584,7 @@ describe('Neo4j Plugin Integration', () => {
     // 4. Action: Retrieve using a non-matching filter
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         // The filter does not match any property on the indexed nodes
