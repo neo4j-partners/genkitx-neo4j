@@ -86,6 +86,17 @@ export const neo4jIndexerRef = (params: {
   });
 };
 
+interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
+    indexId: string;
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+    clientParams?: Neo4jGraphConfig;
+    label?: string;
+    textProperty?: string;
+    embeddingProperty?: string;
+    idProperty?: string;
+  }
+
 /**
  * Neo4j plugin that provides a Neo4j retriever and indexer
  * @param params An array of params to set up Neo4j retrievers and indexers
@@ -98,12 +109,7 @@ and NEO4J_PASSWORD environment variable will be used instead.
  * @returns The Neo4j Genkit plugin
  */
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
-  params: {
-    clientParams?: Neo4jGraphConfig;
-    indexId: string;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  }[],
+  params: Neo4jParams<EmbedderCustomOptions>[],
 ): GenkitPlugin {
   return genkitPlugin("neo4j", async (ai: Genkit) => {
     params.map((i) => configureNeo4jRetriever(ai, i));
@@ -129,12 +135,7 @@ export function configureNeo4jRetriever<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  params: {
-    indexId: string;
-    clientParams?: Neo4jGraphConfig;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  },
+  params: Neo4jParams<EmbedderCustomOptions>,
 ) {
   const { indexId, embedder, embedderOptions } = {
     ...params,
@@ -156,7 +157,7 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, indexId);
+      const retriever_query = retrieverQuery(options, params);
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -186,23 +187,19 @@ export function configureNeo4jRetriever<
   );
 }
 
-const retrieverQuery = (options: {
+const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
+  options: {
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
-  }, indexId: string): {query: string, additionalParams: Record<string, any>} => {
+  },
+  params: Neo4jParams<EmbedderCustomOptions>
+): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
+  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text' } = params;
 
-  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
-  const nodeLabel = indexId;
+  const nodeLabel = label || indexId;
   
-  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
-  const embeddingNodeProperty = "embedding";
-
-  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/9
-  const textNodeProperty = "text";
-  
-  // TODO - customize it: https://github.com/neo4j-partners/genkitx-neo4j/issues/3
-  const retrievalQuery = `RETURN node.${textNodeProperty} AS text, node {.*, text: Null,
+  const retrievalQuery = `RETURN node.${textProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
 
   if (filter == null) {
@@ -217,14 +214,13 @@ const retrieverQuery = (options: {
   const baseIndexQuery = `
     CYPHER runtime = parallel parallelRuntimeSupport=all 
     MATCH (n:\`${nodeLabel}\`)
-    WHERE n.\`${embeddingNodeProperty}\` IS NOT NULL
-    // AND size(n.\`${embeddingNodeProperty}\`) = toInteger(${options.k}) 
+    WHERE n.\`${embeddingProperty}\` IS NOT NULL
     AND
   `;
 
   const baseCosineQuery = `
     WITH n as node, vector.similarity.cosine(
-      n.\`${embeddingNodeProperty}\`,
+      n.\`${embeddingProperty}\`,
       $embedding
     ) AS score ORDER BY score DESC LIMIT toInteger($k)
   `;
@@ -252,14 +248,15 @@ export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
-  params: {
-    indexId: string;
-    clientParams?: Neo4jGraphConfig;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-  },
+  params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, embedder, embedderOptions } = {
+  const { indexId, 
+    embedder, 
+    embedderOptions,
+    embeddingProperty = 'embedding',
+    idProperty = 'id',
+    label, 
+    textProperty = 'text' } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
@@ -283,29 +280,36 @@ export function configureNeo4jIndexer<
           }),
         ),
       );
+      console.log('embeddings', embeddings)
 
       const BATCH_SIZE = 1000;
+      const labelName = label || indexId;
 
       for (let i = 0; i < docs.length; i += BATCH_SIZE) {
         const batchDocs = docs.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
 
-        const batchParams = batchDocs.map((el, j) => ({
+        const batchParams = batchDocs.map((el, j) => {
+          return ({
           text: el.content[0]["text"],
           metadata: el.metadata ?? {},
           embedding: batchEmbeddings[j][0]["embedding"],
-        }));
+          id: el.content[0]["id"] || Date.now()
+        })
+      });
+
+        const createOrMerge = `CREATE (t:\`${labelName}\` {${idProperty}: row.id})`;
 
         await neo4j_instance.executeQuery(
           `
           UNWIND $data AS row
-          CREATE (t:\`${indexId}\`)
-          SET t.text = row.text,
+          ${createOrMerge}
+          SET t.${textProperty} = row.text,
               t += row.metadata
           WITH t, row.embedding AS embedding
-          CALL db.create.setNodeVectorProperty(t, 'embedding', embedding)
+          CALL db.create.setNodeVectorProperty(t, $embedding, embedding)
           `,
-          { data: batchParams },
+          { data: batchParams, embedding: embeddingProperty },
           { database: neo4jConfig.database },
         );
       }
@@ -313,7 +317,7 @@ export function configureNeo4jIndexer<
       await neo4j_instance.executeQuery(
         `
         CREATE VECTOR INDEX $indexName IF NOT EXISTS
-        FOR (n:\`${indexId}\`) ON n.embedding
+        FOR (n:\`${labelName}\`) ON n.embedding
         `,
         { indexName: indexId },
         { database: neo4jConfig.database },
@@ -345,3 +349,4 @@ function getDefaultConfig() {
     ...(database && { database }),
   };
 }
+
