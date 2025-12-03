@@ -280,7 +280,6 @@ export function configureNeo4jIndexer<
           }),
         ),
       );
-      console.log('embeddings', embeddings)
 
       const BATCH_SIZE = 1000;
       const labelName = label || indexId;

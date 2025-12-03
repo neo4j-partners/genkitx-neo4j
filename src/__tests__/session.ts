@@ -1,14 +1,13 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
 import { Driver, auth, driver as neo4jDriver, Session } from 'neo4j-driver';
 import { Neo4jSessionStore, Neo4jSessionStoreConfig } from '../session';
-// import { setupNeo4jTestHooks, driver, session, canRunTest, indexId } from './test-utils';
+import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
+import { Wait } from 'testcontainers';
+
 
 describe('Neo4jSessionStore', () => {
-  const requiredVars = ['NEO4J_URI', 'NEO4J_USERNAME', 'NEO4J_PASSWORD'];
-  const missingVars = requiredVars.filter(env => !process.env[env]);
-  const canRunTest = missingVars.length === 0;
-
-  const runTest = canRunTest ? test : test.skip;
+  // Reference to the Testcontainers Neo4j instance
+  let neo4jContainer: StartedNeo4jContainer;
 
   let neo4jDriverInstance: Driver;
   let store: Neo4jSessionStore;
@@ -24,23 +23,28 @@ describe('Neo4jSessionStore', () => {
   };
 
   beforeAll(async () => {
-    if (!canRunTest) return;
+    // 1. Start the Neo4j Docker container using Testcontainers.
+    // This automatically pulls the image and waits for the database to be ready.
+    neo4jContainer = await new Neo4jContainer('neo4j:5.26.16')
+      .withWaitStrategy(Wait.forLogMessage('Started.'))
+      .start();
+          
+    config.url = neo4jContainer.getBoltUri();
+    config.username = neo4jContainer.getUsername();
+    config.password = neo4jContainer.getPassword();
+
     neo4jDriverInstance = neo4jDriver(
       config.url,
       auth.basic(config.username, config.password || ''),
     );
-  });
-
-  // setupNeo4jTestHooks();
+  }, 120000);
 
   beforeEach(async () => {
-    if (!canRunTest) return;
     store = new Neo4jSessionStore(config);
     neo4jSession = neo4jDriverInstance.session();
   });
 
   afterEach(async () => {
-    if (!canRunTest) return;
     try {
       // Use DETACH DELETE to clean up both nodes and their relationships
       await neo4jSession.run(`MATCH (n) DETACH DELETE n`);
@@ -50,11 +54,10 @@ describe('Neo4jSessionStore', () => {
   });
 
   afterAll(async () => {
-    if (!canRunTest) return;
     await neo4jDriverInstance.close();
   });
 
-  runTest('should save and retrieve session data and verify the graph structure', async () => {
+  test('should save and retrieve session data and verify the graph structure', async () => {
     const sessionId = 'test-session-1';
     const sessionData = {
       id: sessionId,
@@ -87,13 +90,13 @@ describe('Neo4jSessionStore', () => {
     expect(retrievedData).toEqual(sessionData);
   });
 
-  runTest('should return undefined for a non-existent session', async () => {
+  test('should return undefined for a non-existent session', async () => {
     const sessionId = 'non-existent-session';
     const retrievedData = await store.get(sessionId);
     expect(retrievedData).toBeUndefined();
   });
 
-  runTest('should update an existing session and append new nodes', async () => {
+  test('should update an existing session and append new nodes', async () => {
     const sessionId = 'test-session-2';
     const initialData = {
       id: sessionId,
@@ -151,7 +154,7 @@ describe('Neo4jSessionStore', () => {
     expect(retrievedData).toEqual(expectedData);
   });
   
-  runTest('should work with custom node labels', async () => {
+  test('should work with custom node labels', async () => {
     const customConfig = {
       ...config,
       sessionLabel: 'CustomSession',
@@ -181,7 +184,7 @@ describe('Neo4jSessionStore', () => {
     await neo4jSession.run(`MATCH (n:CustomMessage) DETACH DELETE n`);
   });
 
-  runTest('should work with custom relationship types', async () => {
+  test('should work with custom relationship types', async () => {
     const customConfig = {
       ...config,
       nextMessageRelType: 'THREAD_NEXT',
