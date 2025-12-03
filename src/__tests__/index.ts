@@ -8,6 +8,7 @@ import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
 import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
 import { mockEmbedder } from '../dummyEmbedder';
 import { Wait } from 'testcontainers';
+import { fail } from 'assert';
 
 /**
  * This file contains integration tests for the Genkit Neo4j plugin,
@@ -33,12 +34,7 @@ describe('Neo4j Plugin Integration', () => {
   const CLEANUP_QUERY = `MATCH (n) DETACH DELETE n`;
   const FIND_NODE_QUERY = `MATCH (n:${INDEX_LABEL} {uniqueId: $uniqueId}) RETURN n`;
 
-  const clientParams = {
-      url: process.env.NEO4J_URI as string,
-      username: process.env.NEO4J_USERNAME as string,
-      password: process.env.NEO4J_PASSWORD as string,
-      database: 'neo4j',
-  };
+  let clientParams;
   
   // --- Setup and Teardown ---
 
@@ -65,13 +61,12 @@ describe('Neo4j Plugin Integration', () => {
   beforeEach(async () => {
 
     // 4. Configure the client with dynamic connection parameters from the container
-    const clientParams = {
+    clientParams = {
         url: neo4jContainer.getBoltUri(),
         username: neo4jContainer.getUsername(),
         password: neo4jContainer.getPassword(),
         database: 'neo4j',
     };
-
 
     // Initialize Genkit with dynamic parameters
     ai = genkit({
@@ -81,7 +76,7 @@ describe('Neo4j Plugin Integration', () => {
           {
             indexId, 
             embedder: mockEmbedder, 
-            clientParams, 
+            clientParams: clientParams, 
           },
         ]),
       ],
@@ -121,7 +116,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: initialText }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This is a test document to be indexed.';
+    const query = 'This is a test document to be retrieved.';
 
     // 2. Action: Index the document
     // Uses the predefined indexer reference (INDEXER_REF)
@@ -142,7 +137,7 @@ describe('Neo4j Plugin Integration', () => {
     // Uses the predefined retriever reference (RETRIEVER_REF)
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         filter: { uniqueId }, // Filters by the unique ID to ensure a hit
@@ -154,7 +149,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
   });
 
-  test('should document and retrieve it with custom label', async () => {
+  test('should document and retrieve it with custom label and hybrid search', async () => {
     const customLabel = 'customLabel'
     const customLabelIdx = 'customLabelIdx'
     ai = genkit({
@@ -163,9 +158,10 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customLabelIdx,
-            embedder: googleAI.embedder('gemini-embedding-001'),
+            embedder: mockEmbedder,
             clientParams,
-            label: customLabel
+            label: customLabel,
+            fullTextQuery: 'document',
           },
         ]),
       ],
@@ -197,14 +193,14 @@ describe('Neo4j Plugin Integration', () => {
     
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await session.run(verificationQuery);
-    console.log(result.records)
 
     expect(result.records).toHaveLength(1);
     const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
     expect(allCustomLabels).toBeTruthy();
   });
 
-  test('should document and retrieve it with custom label and filter', async () => {
+  test('should throws error with filter and hybrid search', async () => {
+    // todo
     const customLabel = 'customLabel'
     const customLabelIdx = 'customLabelIdx'
     ai = genkit({
@@ -213,9 +209,57 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customLabelIdx, 
-            embedder: googleAI.embedder('gemini-embedding-001'),
+            embedder: mockEmbedder,
             clientParams, 
-            label: customLabel
+            label: customLabel,
+            fullTextQuery: 'document',
+            searchType: 'hybrid',
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customLabelIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customLabelIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    try {
+      const docs = await ai.retrieve({
+        retriever: retrieverRef,
+        query: 'This is a test document to be indexed.',
+        options: {
+          k: 10,
+          filter: { uniqueId },
+        },
+      });
+      fail("Expected error was not thrown");
+    } catch (e) {
+      console.log("Caught error as expected");
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).message).toBe("Metadata filtering can't be use in combination with a hybrid search approach."); 
+    }
+  })
+
+  test('should document and retrieve it with custom label and hybrid search without fullTextQuery', async () => {
+    const customLabel = 'customLabel'
+    const customLabelIdx = 'customLabelIdx'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customLabelIdx, 
+            embedder: mockEmbedder,
+            clientParams, 
+            label: customLabel,
           },
         ]),
       ],
@@ -238,24 +282,20 @@ describe('Neo4j Plugin Integration', () => {
       query: 'This is a test document to be indexed.',
       options: {
         k: 10,
-        filter: { uniqueId },
       },
     });
 
     expect(docs).toHaveLength(1);
-    expect(docs[0].content[0].text).toContain('indexing and retrieval');
-    
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');    
     
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await session.run(verificationQuery);
-    console.log(result.records)
-
     expect(result.records).toHaveLength(1);
     const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
     expect(allCustomLabels).toBeTruthy();
   });
 
-  test('should document and retrieve it with custom label, properties and filter', async () => {
+  test('should document and retrieve it with custom label, properties and filter and hybrid search', async () => {
     const customLabel = 'customLabelEntities'
     const customEntitiesIdx = 'customEntitiesIdx'
     const customTextProperty = 'customTextProperty'
@@ -267,12 +307,14 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customEntitiesIdx, 
-            embedder: googleAI.embedder('gemini-embedding-001'),
-            clientParams, 
+            embedder: mockEmbedder,
+            clientParams: clientParams, 
             label: customLabel,
             textProperty: customTextProperty,
             embeddingProperty: customEmbeddingProperty,
             idProperty: customIdProperty,
+            fullTextQuery: 'document',
+            searchType: 'hybrid',
           },
         ]),
       ],
@@ -295,7 +337,6 @@ describe('Neo4j Plugin Integration', () => {
       query: 'This is a test document to be indexed.',
       options: {
         k: 10,
-        filter: { uniqueId },
       },
     });
 
@@ -305,7 +346,6 @@ describe('Neo4j Plugin Integration', () => {
     
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await session.run(verificationQuery);
-    console.log(result.records)
 
     expect(result.records).toHaveLength(1);
     const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
@@ -315,7 +355,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(props).toEqual([[customEmbeddingProperty, customTextProperty, customIdProperty, 'uniqueId']])
   });
 
-  runTest('should retrieve documents using a specific metadata filter', async () => {
+  test('should retrieve documents using a specific metadata filter', async () => {
     // 1. Data Setup
     const commonId = `common-doc-${Date.now()}`;
     const CAT_ANIMAL = 'cat';
@@ -348,12 +388,12 @@ describe('Neo4j Plugin Integration', () => {
     expect(animals).toEqual(expect.arrayContaining([CAT_ANIMAL, CAT_ANIMAL, DOG_ANIMAL]));
 
     // 4. Action: Retrieve using a metadata filter
-    const retrievalQuery = 'What animal information is available?';
+    const query = 'What animal information is available?';
     const filter = { animal: CAT_ANIMAL, commonId };
 
     const retrievedDocs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         filter, // Apply the filter: should only retrieve "cat" documents
@@ -372,7 +412,7 @@ describe('Neo4j Plugin Integration', () => {
       content: [{ text: 'This is a test document about technology.' }],
       metadata: { uniqueId },
     });
-    const retrievalQuery = 'This query should not find anything about animals.';
+    const query = 'This query should not find anything about animals.';
     const nonMatchingFilter = { nonExistentField: 'nonExistentValue' };
 
     // 2. Action: Index a document
@@ -388,7 +428,7 @@ describe('Neo4j Plugin Integration', () => {
     // 4. Action: Retrieve using a non-matching filter
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
-      query: retrievalQuery,
+      query: query,
       options: {
         k: 10,
         // The filter does not match any property on the indexed nodes
