@@ -33,12 +33,7 @@ describe('Neo4j Plugin Integration', () => {
   const CLEANUP_QUERY = `MATCH (n) DETACH DELETE n`;
   const FIND_NODE_QUERY = `MATCH (n:${INDEX_LABEL} {uniqueId: $uniqueId}) RETURN n`;
 
-  const clientParams = {
-      url: process.env.NEO4J_URI as string,
-      username: process.env.NEO4J_USERNAME as string,
-      password: process.env.NEO4J_PASSWORD as string,
-      database: 'neo4j',
-  };
+  let clientParams;
   
   // --- Setup and Teardown ---
 
@@ -65,7 +60,7 @@ describe('Neo4j Plugin Integration', () => {
   beforeEach(async () => {
 
     // 4. Configure the client with dynamic connection parameters from the container
-    const clientParams = {
+    clientParams = {
         url: neo4jContainer.getBoltUri(),
         username: neo4jContainer.getUsername(),
         password: neo4jContainer.getPassword(),
@@ -163,7 +158,7 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customLabelIdx,
-            embedder: googleAI.embedder('gemini-embedding-001'),
+            embedder: mockEmbedder,
             clientParams,
             label: customLabel
           },
@@ -213,7 +208,7 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customLabelIdx, 
-            embedder: googleAI.embedder('gemini-embedding-001'),
+            embedder: mockEmbedder,
             clientParams, 
             label: customLabel
           },
@@ -267,7 +262,7 @@ describe('Neo4j Plugin Integration', () => {
         neo4j([
           {
             indexId: customEntitiesIdx, 
-            embedder: googleAI.embedder('gemini-embedding-001'),
+            embedder: mockEmbedder,
             clientParams, 
             label: customLabel,
             textProperty: customTextProperty,
@@ -315,7 +310,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(props).toEqual([[customEmbeddingProperty, customTextProperty, customIdProperty, 'uniqueId']])
   });
 
-  runTest('should retrieve documents using a specific metadata filter', async () => {
+  test('should retrieve documents using a specific metadata filter', async () => {
     // 1. Data Setup
     const commonId = `common-doc-${Date.now()}`;
     const CAT_ANIMAL = 'cat';
