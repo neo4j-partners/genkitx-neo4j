@@ -2,27 +2,22 @@ import { googleAI } from '@genkit-ai/googleai';
 import { Document, genkit } from 'genkit';
 import { test, describe, expect, afterAll, beforeAll, beforeEach, afterEach } from '@jest/globals';
 import { Driver, auth, driver as neo4jDriver, Session } from 'neo4j-driver';
-// Imports necessary functions and references from the neo4j plugin
 import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
 
+// Import the Testcontainers equivalent for Node.js
+import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
+import { mockEmbedder } from '../dummyEmbedder';
+import { Wait } from 'testcontainers';
+
 /**
- * This file contains integration tests for the Genkit Neo4j plugin.
- * To run these tests, ensure the following environment variables are set:
- * - NEO4J_URI: The URI of the Neo4j instance (e.g., bolt://localhost:7687)
- * - NEO4J_USERNAME: The username for Neo4j authentication
- * - NEO4J_PASSWORD: The password for Neo4j authentication
- * - GEMINI_API_KEY: Your Google Gemini API key
- *
- * The Neo4j instance must be running and accessible.
+ * This file contains integration tests for the Genkit Neo4j plugin,
+ * using @testcontainers/neo4j to spin up a disposable Docker Neo4j instance
+ * for each test run.
  */
 describe('Neo4j Plugin Integration', () => {
-  // --- Configuration and Environment Variables ---
-  const requiredVars = ['NEO4J_URI', 'NEO4J_USERNAME', 'NEO4J_PASSWORD', 'GEMINI_API_KEY'];
-  const missingVars = requiredVars.filter(env => !process.env[env]);
-  const canRunTest = missingVars.length === 0;
-
-  // Decides whether to run or skip the tests based on the presence of environment variables.
-  const runTest = canRunTest ? test : test.skip;
+  
+  // Reference to the Testcontainers Neo4j instance
+  let neo4jContainer: StartedNeo4jContainer;
 
   // Global variables for the Genkit instance and Neo4j connection
   let ai: ReturnType<typeof genkit>;
@@ -33,83 +28,92 @@ describe('Neo4j Plugin Integration', () => {
   const indexId = 'genkit-test-index';
   // Cypher Label for the node, quoted for safety
   const INDEX_LABEL = `\`${indexId}\``; 
-
-  // References to the Indexer and Retriever, defined once
   const INDEXER_REF = neo4jIndexerRef({ indexId });
   const RETRIEVER_REF = neo4jRetrieverRef({ indexId });
-
-  // Cypher Cleanup Query: deletes all nodes with the test label
-  const CLEANUP_QUERY = `MATCH (n:${INDEX_LABEL}) DETACH DELETE n`;
-  // Cypher Verification Query: finds a node based on a unique ID
+  const CLEANUP_QUERY = `MATCH (n) DETACH DELETE n`;
   const FIND_NODE_QUERY = `MATCH (n:${INDEX_LABEL} {uniqueId: $uniqueId}) RETURN n`;
 
+  const clientParams = {
+      url: process.env.NEO4J_URI as string,
+      username: process.env.NEO4J_USERNAME as string,
+      password: process.env.NEO4J_PASSWORD as string,
+      database: 'neo4j',
+  };
   
   // --- Setup and Teardown ---
 
   beforeAll(async () => {
-    if (!canRunTest) {
-        console.warn(`Skipping Neo4j tests: Missing environment variables: ${missingVars.join(', ')}`);
-        return;
-    }
 
-    // Initializes the standalone Neo4j driver for verification and cleanup operations
+    // 1. Start the Neo4j Docker container using Testcontainers.
+    // This automatically pulls the image and waits for the database to be ready.
+    neo4jContainer = await new Neo4jContainer('neo4j:5.26.16')
+      .withWaitStrategy(Wait.forLogMessage('Started.'))
+      .start();
+    
+    // 2. Get the dynamically generated connection parameters
+    const uri = neo4jContainer.getBoltUri();
+    const username = neo4jContainer.getUsername();
+    const password = neo4jContainer.getPassword();
+
+    // 3. Initialize the standalone Neo4j driver (for cleanup/verification)
     driver = neo4jDriver(
-      process.env.NEO4J_URI as string,
-      auth.basic(process.env.NEO4J_USERNAME as string, process.env.NEO4J_PASSWORD as string),
+      uri,
+      auth.basic(username, password),
     );
-  });
+  }, 120000);
 
   beforeEach(async () => {
-    if (!canRunTest) return;
 
-    // Configuration of Neo4j client connection parameters for the Genkit plugin
+    // 4. Configure the client with dynamic connection parameters from the container
     const clientParams = {
-        url: process.env.NEO4J_URI as string,
-        username: process.env.NEO4J_USERNAME as string,
-        password: process.env.NEO4J_PASSWORD as string,
+        url: neo4jContainer.getBoltUri(),
+        username: neo4jContainer.getUsername(),
+        password: neo4jContainer.getPassword(),
         database: 'neo4j',
     };
 
-    // Initializes Genkit with the Google AI plugin and the Neo4j plugin
+
+    // Initialize Genkit with dynamic parameters
     ai = genkit({
       plugins: [
         googleAI(),
         neo4j([
           {
-            indexId, // The index ID to configure
-            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
-            clientParams, // Neo4j connection parameters
+            indexId, 
+            embedder: mockEmbedder, 
+            clientParams, 
           },
         ]),
       ],
     });
     
-    // Opens a new Neo4j session for verification operations
+    // Open a new Neo4j session for verification operations
     session = driver.session();
   });
   
   afterEach(async () => {
-    if (!canRunTest) return;
     
-    // Cleanup: deletes all nodes created by the test to ensure test isolation
+    // Cleanup: deletes all test nodes
     try {
       await session.run(CLEANUP_QUERY);
     } finally {
-      // Closes the Neo4j session after cleanup
+      // Close the Neo4j session after cleanup
       await session.close();
     }
   });
 
   afterAll(async () => {
-    if (!canRunTest) return;
-    // Closes the global Neo4j driver at the end of all tests
+    // Close the global Neo4j driver
     await driver.close();
+    
+    // 5. Stop and dispose of the Testcontainers Neo4j container
+    await neo4jContainer.stop();
   });
 
 
   // --- Integration Tests ---
 
-  runTest('should successfully index a document and verify node creation', async () => {
+  test('should successfully index a document and verify node creation', async () => {
     // 1. Data Setup
     const uniqueId = `test-doc-${Date.now()}`;
     const initialText = 'This is a test document for indexing and retrieval.';
@@ -148,6 +152,167 @@ describe('Neo4j Plugin Integration', () => {
     // 5. Retrieval Verification
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
+  });
+
+  test('should document and retrieve it with custom label', async () => {
+    const customLabel = 'customLabel'
+    const customLabelIdx = 'customLabelIdx'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customLabelIdx,
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams,
+            label: customLabel
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customLabelIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customLabelIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+  });
+
+  test('should document and retrieve it with custom label and filter', async () => {
+    const customLabel = 'customLabel'
+    const customLabelIdx = 'customLabelIdx'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customLabelIdx, 
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams, 
+            label: customLabel
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customLabelIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customLabelIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10,
+        filter: { uniqueId },
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+  });
+
+  test('should document and retrieve it with custom label, properties and filter', async () => {
+    const customLabel = 'customLabelEntities'
+    const customEntitiesIdx = 'customEntitiesIdx'
+    const customTextProperty = 'customTextProperty'
+    const customEmbeddingProperty = 'customEmbeddingProperty'
+    const customIdProperty = 'customIdProperty'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customEntitiesIdx, 
+            embedder: googleAI.embedder('gemini-embedding-001'),
+            clientParams, 
+            label: customLabel,
+            textProperty: customTextProperty,
+            embeddingProperty: customEmbeddingProperty,
+            idProperty: customIdProperty,
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customEntitiesIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customEntitiesIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10,
+        filter: { uniqueId },
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+    console.log(result.records)
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+
+    const props = result.records.map(r => Object.keys(r.get('n').properties));
+    expect(props).toEqual([[customEmbeddingProperty, customTextProperty, customIdProperty, 'uniqueId']])
   });
 
   runTest('should retrieve documents using a specific metadata filter', async () => {
@@ -200,7 +365,7 @@ describe('Neo4j Plugin Integration', () => {
     expect(retrievedDocs.every(doc => doc.metadata?.animal === CAT_ANIMAL)).toBe(true);
   });
 
-  runTest('should return an empty array for a non-matching query', async () => {
+  test('should return an empty array for a non-matching query', async () => {
     // 1. Data Setup
     const uniqueId = `test-doc-${Date.now()}`;
     const newDocument = new Document({
