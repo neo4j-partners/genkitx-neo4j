@@ -12,7 +12,6 @@ import { fail } from 'assert';
 import { googleAI } from '@genkit-ai/googleai';
 import { HypotheticalQuestionRetriever, ParentChildRetriever } from '../rag-utils';
 
-
 /**
  * This file contains integration tests for the Genkit Neo4j plugin.
  * To run these tests, ensure the following environment variables are set:

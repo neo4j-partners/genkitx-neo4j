@@ -105,6 +105,17 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   creationQuery?: string;
 }
 
+interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
+    indexId: string;
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+    clientParams?: Neo4jGraphConfig;
+    label?: string;
+    textProperty?: string;
+    embeddingProperty?: string;
+    idProperty?: string;
+  }
+
 /**
  * Neo4j plugin that provides a Neo4j retriever and indexer
  * @param params An array of params to set up Neo4j retrievers and indexers
@@ -420,3 +431,4 @@ function getDefaultConfig() {
 
   return { url, username, password, ...(database && { database }) };
 }
+
