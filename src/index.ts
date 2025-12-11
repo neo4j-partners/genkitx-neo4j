@@ -219,7 +219,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   if (filter == null) {
       const hybridQuery =`
           CALL {
-              CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
+              CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
               WITH collect({node:node, score:score}) AS nodes, max(score) AS max
               UNWIND nodes AS n
               // We use 0 as min
