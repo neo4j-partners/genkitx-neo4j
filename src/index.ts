@@ -225,7 +225,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
               // We use 0 as min
               RETURN n.node AS node, (n.score / max) AS score 
               UNION
-              CALL db.index.fulltext.queryNodes($fullTextIndexName, $fullTextQuery, {limit: $k}) YIELD node, score
+              CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery, {limit: $k}) YIELD node, score
               WITH collect({node: node, score: score}) AS nodes, max(score) AS max
               UNWIND nodes AS n
               RETURN n.node AS node, (n.score / max) AS score
@@ -242,6 +242,8 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
       ? hybridQuery
       : vectorQuery;
 
+    isHybrid && console.log("Generated Query name:", fullTextIndexName);
+      
     const additionalParams = isHybrid
       ? {fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName}
       : {};

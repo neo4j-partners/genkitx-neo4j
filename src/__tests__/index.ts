@@ -350,8 +350,76 @@ describe('Neo4j Plugin Integration', () => {
     const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
     expect(allCustomLabels).toBeTruthy();
 
-    const props = result.records.map(r => Object.keys(r.get('n').properties));
-    expect(props).toEqual([[customEmbeddingProperty, customTextProperty, customIdProperty, 'uniqueId']])
+    const props = result.records.map(r => Object.keys(r.get('n').properties))[0];
+    expect(props).toContain(customIdProperty)
+    expect(props).toContain(customTextProperty)
+    expect(props).toContain(customEmbeddingProperty)
+    expect(props).toContain('uniqueId')
+  });
+
+
+  test('should document and retrieve it with custom label, properties and filter and hybrid search with custom fullTextIndexName', async () => {
+    const customLabel = 'customLabelEntities1'
+    const customEntitiesIdx = 'customEntitiesIdx1'
+    const customTextProperty = 'customTextProperty1'
+    const customEmbeddingProperty = 'customEmbeddingProperty1'
+    const customIdProperty = 'customIdProperty1'
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId: customEntitiesIdx, 
+            embedder: mockEmbedder,
+            clientParams: clientParams, 
+            label: customLabel,
+            textProperty: customTextProperty,
+            embeddingProperty: customEmbeddingProperty,
+            idProperty: customIdProperty,
+            fullTextQuery: 'document',
+            searchType: 'hybrid',
+            fullTextIndexName: 'customFullTextIndexName', 
+          },
+        ]),
+      ],
+    });
+
+    const uniqueId = `test-doc-${Date.now()}`;
+    const newDocument = new Document({
+      content: [
+        { text: 'This is a test document for indexing and retrieval.' }
+      ],
+      metadata: { uniqueId },
+    });
+
+    const indexerRef = neo4jIndexerRef({ indexId: customEntitiesIdx });
+    const retrieverRef = neo4jRetrieverRef({ indexId: customEntitiesIdx });
+    await ai.index({ indexer: indexerRef, documents: [newDocument] });
+
+    const docs = await ai.retrieve({
+      retriever: retrieverRef,
+      query: 'This is a test document to be indexed.',
+      options: {
+        k: 10,
+      },
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+    
+    
+    const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
+    const result = await session.run(verificationQuery);
+
+    expect(result.records).toHaveLength(1);
+    const allCustomLabels = result.records.every(r => r.get('n').labels[0] == customLabel);
+    expect(allCustomLabels).toBeTruthy();
+
+    const props = result.records.map(r => Object.keys(r.get('n').properties))[0];
+    expect(props).toContain(customIdProperty)
+    expect(props).toContain(customTextProperty)
+    expect(props).toContain(customEmbeddingProperty)
+    expect(props).toContain('uniqueId')
   });
 
   test('should retrieve documents using a specific metadata filter', async () => {
