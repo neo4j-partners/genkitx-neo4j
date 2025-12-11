@@ -200,7 +200,6 @@ describe('Neo4j Plugin Integration', () => {
   });
 
   test('should throws error with filter and hybrid search', async () => {
-    // todo
     const customLabel = 'customLabel'
     const customLabelIdx = 'customLabelIdx'
     ai = genkit({

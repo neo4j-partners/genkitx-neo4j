@@ -216,23 +216,34 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
     throw new Error("Neither fullTextQuery nor content is defined for hybrid search.");
   }
 
-
   if (filter == null) {
+      const hybridQuery =`
+          CALL {
+              CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
+              WITH collect({node:node, score:score}) AS nodes, max(score) AS max
+              UNWIND nodes AS n
+              // We use 0 as min
+              RETURN n.node AS node, (n.score / max) AS score 
+              UNION
+              CALL db.index.fulltext.queryNodes($fullTextIndexName, $fullTextQuery, {limit: $k}) YIELD node, score
+              WITH collect({node: node, score: score}) AS nodes, max(score) AS max
+              UNWIND nodes AS n
+              RETURN n.node AS node, (n.score / max) AS score
+          }
+          WITH node, max(score) AS score ORDER BY score DESC LIMIT toInteger($k)
+          ${fullTextRetrievalQuery}`
+
     const vectorQuery = `
       CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
       ${retrievalQuery}
       `;
       
     const query = isHybrid
-      ? `${vectorQuery} 
-        UNION 
-        CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery) YIELD node, score 
-        ${fullTextRetrievalQuery}
-        `
+      ? hybridQuery
       : vectorQuery;
 
     const additionalParams = isHybrid
-      ? {fullTextQuery: params?.fullTextQuery ?? content}
+      ? {fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName}
       : {};
 
     return { query, additionalParams };
@@ -363,6 +374,8 @@ export function configureNeo4jIndexer<
           FOR (n:\`${labelName}\`)
           ON EACH [n.\`${textProperty}\`]
           `;
+          console.log("Creating fulltext index:", fullTextIndexQuery);
+          console.log("With name:", fullTextIndexName);
         await neo4j_instance.executeQuery(
           fullTextIndexQuery,
           { fullTextIndexName: fullTextIndexName },
