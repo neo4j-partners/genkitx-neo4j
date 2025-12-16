@@ -1,7 +1,5 @@
-// src/session.ts - Corrected final implementation
-
 import { SessionData, SessionStore } from '@genkit-ai/ai/session';
-import { Driver, Session, auth, driver as neo4jDriver } from 'neo4j-driver';
+import { Driver, auth, driver as neo4jDriver } from 'neo4j-driver';
 
 export interface Neo4jSessionStoreConfig {
   url: string;

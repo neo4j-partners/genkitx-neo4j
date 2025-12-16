@@ -46,7 +46,6 @@ describe('Neo4jSessionStore', () => {
 
   afterEach(async () => {
     try {
-      // Use DETACH DELETE to clean up both nodes and their relationships
       await neo4jSession.run(`MATCH (n) DETACH DELETE n`);
     } finally {
       await neo4jSession.close();
