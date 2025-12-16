@@ -27,17 +27,16 @@ import {
   retrieverRef,
 } from "genkit/retriever";
 import { constructMetadataFilter } from "./filter-utils";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from 'crypto';
 
+const FULLTEXT_INDEX_SUFFIX = "__fulltext";
+export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
 });
 
-<<<<<<< HEAD
 
-=======
->>>>>>> f7738b4 (wip 6)
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
 });
@@ -103,18 +102,11 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   idProperty?: string;
   retrievalQuery?: string;
   creationQuery?: string;
+  searchType?: SearchType;
+  fullTextRetrievalQuery?: string;
+  fullTextIndexName?: string;
+  fullTextQuery?: string;
 }
-
-interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
-    indexId: string;
-    embedder: EmbedderArgument<EmbedderCustomOptions>;
-    embedderOptions?: z.infer<EmbedderCustomOptions>;
-    clientParams?: Neo4jGraphConfig;
-    label?: string;
-    textProperty?: string;
-    embeddingProperty?: string;
-    idProperty?: string;
-  }
 
 /**
  * Neo4j plugin that provides a Neo4j retriever and indexer
@@ -259,7 +251,7 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, params);
+      const retriever_query = retrieverQuery(options, params, content?.text ?? '');
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -291,10 +283,11 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
     filter?: Record<string, any> | undefined;
     k?: number | undefined;
   },
-  params: Neo4jParams<EmbedderCustomOptions>
+  params: Neo4jParams<EmbedderCustomOptions>,
+  content: string,
 ): {query: string, additionalParams: Record<string, any>} => {
   const filter = options.filter;
-  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text' } = params;
+  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text', fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX } = params;
 
   const nodeLabel = label || indexId;
   
@@ -302,14 +295,49 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
       embedding: Null, id: Null } AS metadata`;
   console.log('retrievalQuery', retrievalQuery)
 
-  if (!filter) {
-    return {
-      query: `
+  const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
+  const isHybrid = params?.searchType === 'hybrid';
+  if (params?.fullTextQuery == undefined && content == undefined) {
+    throw new Error("Neither fullTextQuery nor content is defined for hybrid search.");
+  }
+
+  if (filter == null) {
+      const hybridQuery =`
+          CALL {
+              CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
+              WITH collect({node:node, score:score}) AS nodes, max(score) AS max
+              UNWIND nodes AS n
+              // We use 0 as min
+              RETURN n.node AS node, (n.score / max) AS score 
+              UNION
+              CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery, {limit: $k}) YIELD node, score
+              WITH collect({node: node, score: score}) AS nodes, max(score) AS max
+              UNWIND nodes AS n
+              RETURN n.node AS node, (n.score / max) AS score
+          }
+          WITH node, max(score) AS score ORDER BY score DESC LIMIT toInteger($k)
+          ${fullTextRetrievalQuery}`
+
+    const vectorQuery = `
       CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
       ${retrievalQuery}
-      `,
-      additionalParams: {}
-    };
+      `;
+      
+    const query = isHybrid
+      ? hybridQuery
+      : vectorQuery;
+
+    isHybrid && console.log("Generated Query name:", fullTextIndexName);
+      
+    const additionalParams = isHybrid
+      ? {fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName}
+      : {};
+
+    return { query, additionalParams };
+  }
+
+  if (isHybrid) {
+    throw new Error(errorMetadataAndHybrid);
   }
   
   const baseIndexQuery = `
@@ -357,7 +385,11 @@ export function configureNeo4jIndexer<
     embeddingProperty = 'embedding',
     idProperty = 'id',
     label, 
-    textProperty = 'text' } = {
+    textProperty = 'text',
+    searchType = 'vector',
+    fullTextIndexName = indexId + FULLTEXT_INDEX_SUFFIX,
+    fullTextQuery,
+  } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
@@ -372,7 +404,6 @@ export function configureNeo4jIndexer<
       const embeddings = await Promise.all(
         docs.map(doc => ai.embed({ embedder, content: doc, options: embedderOptions })),
       );
-      console.log('embeddings', embeddings)
 
       const BATCH_SIZE = 1000;
       const labelName = label || indexId;
@@ -382,15 +413,15 @@ export function configureNeo4jIndexer<
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
 
         const batchParams = batchDocs.map((el, j) => {
-          return ({
-          text: el.content[0]["text"],
-          metadata: el.metadata ?? {},
-          embedding: batchEmbeddings[j][0]["embedding"],
-          id: el.content[0]["id"] || Date.now()
-        })
-      });
+            return ({
+            text: el.content[0]["text"],
+            metadata: el.metadata ?? {},
+            embedding: batchEmbeddings[j][0]["embedding"],
+            id: el.content[0]["id"] || randomUUID(),
+          })
+        });
 
-        const createOrMerge = `CREATE (t:\`${labelName}\` {${idProperty}: row.id})`;
+        const createOrMerge = `MERGE (t:\`${labelName}\` {${idProperty}: row.id})`;
 
         const creationQuery = params?.creationQuery ?? `
           UNWIND $data AS row
@@ -414,6 +445,21 @@ export function configureNeo4jIndexer<
         { database: neo4jConfig.database },
       );
 
+      if (fullTextQuery != undefined) {
+        const fullTextIndexQuery = `
+          CREATE FULLTEXT INDEX $fullTextIndexName IF NOT EXISTS
+          FOR (n:\`${labelName}\`)
+          ON EACH [n.\`${textProperty}\`]
+          `;
+          console.log("Creating fulltext index:", fullTextIndexQuery);
+          console.log("With name:", fullTextIndexName);
+        await neo4j_instance.executeQuery(
+          fullTextIndexQuery,
+          { fullTextIndexName: fullTextIndexName },
+          { database: neo4jConfig.database },
+        );
+      }
+
       neo4j_instance.close();
     },
   );
@@ -431,4 +477,6 @@ function getDefaultConfig() {
 
   return { url, username, password, ...(database && { database }) };
 }
+
+type SearchType = "vector" | "hybrid"
 
