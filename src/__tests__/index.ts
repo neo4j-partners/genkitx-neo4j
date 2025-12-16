@@ -163,17 +163,16 @@ describe('Neo4j Plugin Integration', () => {
         googleAI(),
         neo4j([
           {
-            indexId, // The index ID to configure
-            embedder: googleAI.embedder('gemini-embedding-001'), // Embedder to use
+            indexId,
+            embedder: mockEmbedder,
             clientParams, 
-            retrievalQuery: "RETURN node.text AS text, 1 AS mockProp"
+            retrievalQuery: "RETURN node.text AS text, {mockProp: '1'} AS metadata"
           },
         ]),
       ],
     });
 
     // 2. Action: Index the document
-    // Uses the predefined indexer reference (INDEXER_REF)
     await ai.index({ indexer: INDEXER_REF, documents: [newDocument] });
 
     // 3. Neo4j Verification: ensure the node was created
@@ -181,27 +180,28 @@ describe('Neo4j Plugin Integration', () => {
       FIND_NODE_QUERY,
       { uniqueId },
     );
-    
-    expect(result.records).toHaveLength(1);
-    expect(result.records[0].get('n').properties.uniqueId).toBeNull();
+
     // Verifies that the content was stored correctly
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].get('n').properties.uniqueId).not.toBeNull();
     expect(result.records[0].get('n').properties.text).toBe(initialText);
-    expect(result.records[0].get('mockProp')).toBe(1);
 
     // 4. Action: Retrieve the indexed document
-    // Uses the predefined retriever reference (RETRIEVER_REF)
     const docs = await ai.retrieve({
       retriever: RETRIEVER_REF,
       query: query,
       options: {
         k: 10,
-        filter: { uniqueId }, // Filters by the unique ID to ensure a hit
+        filter: { uniqueId },
       },
     });
 
     // 5. Retrieval Verification
     expect(docs).toHaveLength(1);
+    console.log('docs[0]', docs[0]);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
+
+    expect(docs[0].metadata?.mockProp).toBe('1');
   });
 
   test('should document and retrieve it with custom label and hybrid search', async () => {
