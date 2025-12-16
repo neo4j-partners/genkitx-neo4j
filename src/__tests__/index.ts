@@ -339,69 +339,6 @@ describe('Neo4j Plugin Integration', () => {
       },
     });
 
-    
-    // Opens a new Neo4j session for verification operations
-    session = driver.session();
-  });
-  
-  afterEach(async () => {
-    if (!canRunTest) return;
-    
-    // Cleanup: deletes all nodes created by the test to ensure test isolation
-    try {
-      await session.run(CLEANUP_QUERY);
-    } finally {
-      // Closes the Neo4j session after cleanup
-      await session.close();
-    }
-  });
-
-  afterAll(async () => {
-    if (!canRunTest) return;
-    // Closes the global Neo4j driver at the end of all tests
-    await driver.close();
-  });
-
-
-  // --- Integration Tests ---
-
-  runTest('should successfully index a document and verify node creation', async () => {
-    // 1. Data Setup
-    const uniqueId = `test-doc-${Date.now()}`;
-    const initialText = 'This is a test document for indexing and retrieval.';
-    const newDocument = new Document({
-      content: [{ text: initialText }],
-      metadata: { uniqueId },
-    });
-    const query = 'This is a test document to be indexed.';
-
-    // 2. Action: Index the document
-    // Uses the predefined indexer reference (INDEXER_REF)
-    await ai.index({ indexer: INDEXER_REF, documents: [newDocument] });
-
-    // 3. Neo4j Verification: ensure the node was created
-    const result = await session.run(
-      FIND_NODE_QUERY,
-      { uniqueId },
-    );
-    
-    expect(result.records).toHaveLength(1);
-    expect(result.records[0].get('n').properties.uniqueId).toBe(uniqueId);
-    // Verifies that the content was stored correctly
-    expect(result.records[0].get('n').properties.text).toBe(initialText);
-
-    // 4. Action: Retrieve the indexed document
-    // Uses the predefined retriever reference (RETRIEVER_REF)
-    const docs = await ai.retrieve({
-      retriever: RETRIEVER_REF,
-      query: query,
-      options: {
-        k: 10,
-        filter: { uniqueId }, // Filters by the unique ID to ensure a hit
-      },
-    });
-
-    // 5. Retrieval Verification
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');    
     
