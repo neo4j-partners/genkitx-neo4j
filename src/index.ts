@@ -98,6 +98,7 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   textProperty?: string;
   embeddingProperty?: string;
   idProperty?: string;
+  retrievalQuery?: string
   searchType?: SearchType;
   fullTextRetrievalQuery?: string;
   fullTextIndexName?: string;
@@ -207,7 +208,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
 
   const nodeLabel = label || indexId;
   
-  const retrievalQuery = `RETURN node.${textProperty} AS text, node {.*, text: Null,
+  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
 
   const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;

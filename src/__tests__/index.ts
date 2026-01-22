@@ -149,6 +149,61 @@ describe('Neo4j Plugin Integration', () => {
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
   });
 
+  test('should successfully index a document with a custom retrieval query and verify node creation', async () => {
+    // 1. Data Setup
+    const uniqueId = `test-doc-${Date.now()}`;
+    const initialText = 'This is a test document for indexing and retrieval.';
+    const newDocument = new Document({
+      content: [{ text: initialText }],
+      metadata: { uniqueId },
+    });
+    const query = 'This is a test document to be indexed.';
+    ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId,
+            embedder: mockEmbedder,
+            clientParams, 
+            retrievalQuery: "RETURN node.text AS text, {mockProp: '1'} AS metadata"
+          },
+        ]),
+      ],
+    });
+
+    // 2. Action: Index the document
+    await ai.index({ indexer: INDEXER_REF, documents: [newDocument] });
+
+    // 3. Neo4j Verification: ensure the node was created
+    const result = await session.run(
+      FIND_NODE_QUERY,
+      { uniqueId },
+    );
+
+    // Verifies that the content was stored correctly
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].get('n').properties.uniqueId).not.toBeNull();
+    expect(result.records[0].get('n').properties.text).toBe(initialText);
+
+    // 4. Action: Retrieve the indexed document
+    const docs = await ai.retrieve({
+      retriever: RETRIEVER_REF,
+      query: query,
+      options: {
+        k: 10,
+        filter: { uniqueId },
+      },
+    });
+
+    // 5. Retrieval Verification
+    expect(docs).toHaveLength(1);
+    console.log('docs[0]', docs[0]);
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+
+    expect(docs[0].metadata?.mockProp).toBe('1');
+  });
+
   test('should document and retrieve it with custom label and hybrid search', async () => {
     const customLabel = 'customLabel'
     const customLabelIdx = 'customLabelIdx'
