@@ -30,7 +30,7 @@ import { constructMetadataFilter } from "./filter-utils";
 import { randomUUID } from 'crypto';
 
 const FULLTEXT_INDEX_SUFFIX = "__fulltext";
-export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
+export const errorMetadataAndHybrid = "Metadata filtering can't be use in combination with a hybrid search approach."
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
@@ -165,11 +165,11 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
           } as any;
 
           for (const doc of documents) {
-            const docId = doc.id ?? uuidv4();
+            const docId = doc.id ?? randomUUID();
             const chunks = await chunk(doc.text, chunkingConfig);
 
             for (const chunkText of chunks) {
-              const chunkId = uuidv4();
+              const chunkId = randomUUID();
               const subChunks = await chunk(chunkText, { ...chunkingConfig, minLength: 300, maxLength: 500, overlap: 50 });
               const embeddings = await Promise.all(subChunks.map(s => ai.embed({ embedder: param.embedder, content: s, options: param.embedderOptions })));
 
@@ -183,7 +183,7 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
               );
 
               for (let i = 0; i < subChunks.length; i++) {
-                const subId = uuidv4();
+                const subId = randomUUID();
                 const embedding = embeddings[i][0].embedding;
                 await session.run(
                   `MERGE (s:SubChunk {id: $subId})
@@ -205,15 +205,6 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 }
 
 export default neo4j;
-
-/*
-     * @param label: the optional label name (default: "Document")
-     * @param embeddingProperty: the optional embeddingProperty name (default: "embedding")
-     * @param idProperty: the optional id property name (default: "id")
-     * @param metadataPrefix: the optional metadata prefix (default: "")
-     * @param textProperty: the optional textProperty property name (default: "text")
-     * @param indexName: the optional index name (default: "vector")
-*/
 
 /**
  * Configures a Neo4j retriever.
@@ -285,15 +276,14 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   },
   params: Neo4jParams<EmbedderCustomOptions>,
   content: string,
-): {query: string, additionalParams: Record<string, any>} => {
+): { query: string, additionalParams: Record<string, any> } => {
   const filter = options.filter;
   const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text', fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX } = params;
 
   const nodeLabel = label || indexId;
-  
-  const retrievalQuery = `RETURN node.${textProperty} AS text, node {.*, text: Null,
+
+  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null,
       embedding: Null, id: Null } AS metadata`;
-  console.log('retrievalQuery', retrievalQuery)
 
   const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
   const isHybrid = params?.searchType === 'hybrid';
@@ -302,7 +292,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   }
 
   if (filter == null) {
-      const hybridQuery =`
+    const hybridQuery = `
           CALL {
               CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
               WITH collect({node:node, score:score}) AS nodes, max(score) AS max
@@ -322,15 +312,15 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
       CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
       ${retrievalQuery}
       `;
-      
+
     const query = isHybrid
       ? hybridQuery
       : vectorQuery;
 
     isHybrid && console.log("Generated Query name:", fullTextIndexName);
-      
+
     const additionalParams = isHybrid
-      ? {fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName}
+      ? { fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName }
       : {};
 
     return { query, additionalParams };
@@ -339,7 +329,7 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   if (isHybrid) {
     throw new Error(errorMetadataAndHybrid);
   }
-  
+
   const baseIndexQuery = `
     CYPHER runtime = parallel parallelRuntimeSupport=all 
     MATCH (n:\`${nodeLabel}\`)
@@ -379,12 +369,12 @@ export function configureNeo4jIndexer<
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, 
-    embedder, 
+  const { indexId,
+    embedder,
     embedderOptions,
     embeddingProperty = 'embedding',
     idProperty = 'id',
-    label, 
+    label,
     textProperty = 'text',
     searchType = 'vector',
     fullTextIndexName = indexId + FULLTEXT_INDEX_SUFFIX,
@@ -402,7 +392,13 @@ export function configureNeo4jIndexer<
     { name: `neo4j/${params.indexId}` },
     async (docs, options) => {
       const embeddings = await Promise.all(
-        docs.map(doc => ai.embed({ embedder, content: doc, options: embedderOptions })),
+        docs.map((doc) =>
+          ai.embed({
+            embedder,
+            content: doc,
+            options: embedderOptions,
+          }),
+        ),
       );
 
       const BATCH_SIZE = 1000;
@@ -413,7 +409,7 @@ export function configureNeo4jIndexer<
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
 
         const batchParams = batchDocs.map((el, j) => {
-            return ({
+          return ({
             text: el.content[0]["text"],
             metadata: el.metadata ?? {},
             embedding: batchEmbeddings[j][0]["embedding"],
@@ -430,7 +426,10 @@ export function configureNeo4jIndexer<
               t += row.metadata
           WITH t, row.embedding AS embedding
           CALL db.create.setNodeVectorProperty(t, $embedding, embedding)
-          `,
+          `;
+
+        await neo4j_instance.executeQuery(
+          creationQuery,
           { data: batchParams, embedding: embeddingProperty },
           { database: neo4jConfig.database },
         );
