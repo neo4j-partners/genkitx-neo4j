@@ -6,3 +6,4 @@ node_modules
 lib
 .vscode
 .env
+.DS_Store

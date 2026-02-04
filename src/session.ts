@@ -20,6 +20,9 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   private readonly nextMessageRelType: string;
   private readonly lastMessageRelType: string;
 
+  public static readonly DEFAULT_SIZE = 100;
+  private windowSize: number;
+
   constructor(config: Neo4jSessionStoreConfig) {
     this.config = config;
     this.sessionLabel = config.sessionLabel || 'GenkitSession';
@@ -31,22 +34,26 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       auth.basic(this.config.username, this.config.password || ''),
       {},
     );
+    this.windowSize = Neo4jSessionStore.DEFAULT_SIZE;
+  }
+
+  public setWindowSize(size: number) {
+    this.windowSize = size;
   }
 
   async get(sessionId: string): Promise<SessionData<S> | undefined> {
     const session = this.driver.session({ database: this.config.database });
     try {
+      const getMessageQuery =  `MATCH (chatSession:\`${this.sessionLabel}\` {sessionId: $sessionId})
+      WITH chatSession
+      MATCH (chatSession)-[:${this.lastMessageRelType}]->(lastMessage)
+      MATCH p=(lastMessage)<-[:${this.nextMessageRelType}*0..${this.windowSize * 2 - 1}]-()
+      WITH chatSession, p, length(p) AS length
+      ORDER BY length DESC LIMIT 1
+      UNWIND reverse(nodes(p)) AS messageNode
+      RETURN chatSession.state AS state, messageNode`;
       const result = await session.run(
-        `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
-         OPTIONAL MATCH p=(s)-[:${this.lastMessageRelType}]->(lastMsg)
-         OPTIONAL MATCH (firstMsg)-[:${this.nextMessageRelType}*0..]->(lastMsg)
-         WHERE NOT (firstMsg)<-[:${this.nextMessageRelType}]-()
-         WITH s, COLLECT(firstMsg) as firstMsgs, lastMsg
-         UNWIND firstMsgs AS firstMsg
-         MATCH path=(firstMsg)-[:${this.nextMessageRelType}*0..]->(lastMsg)
-         WITH s, nodes(path) AS messageNodes ORDER BY length(path)
-         UNWIND messageNodes AS messageNode
-         RETURN s.state AS state, messageNode`,
+        getMessageQuery,
         { sessionId }
       );
 
@@ -159,6 +166,20 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       
       await tx.commit();
 
+    } finally {
+      await session.close();
+    }
+  }
+
+  async clear(sessionId: string): Promise<void> {
+    const session = this.driver.session({ database: this.config.database });
+    try {
+      await session.run(
+        `MATCH p=(chatSession:${this.sessionLabel} {sessionId: $sessionId})-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
+        UNWIND nodes(p) as node
+        DETACH DELETE node`, 
+        { sessionId }
+      );
     } finally {
       await session.close();
     }

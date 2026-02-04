@@ -89,6 +89,119 @@ describe('Neo4jSessionStore', () => {
     expect(retrievedData).toEqual(sessionData);
   });
 
+
+  test('should save and retrieve first 2 session message data and verify the graph structure', async () => {
+    const sessionId = 'test-session-1';
+    const firstMessage = { content: [{ text: 'hi' }], role: 'user' as const, metadata: {} };
+    const secondMessage = { content: [{ text: 'hello' }], role: 'model' as const, metadata: {} };
+    const thirdMessage = { content: [{ text: 'hi again' }], role: 'user' as const, metadata: {} };
+    const fourthMessage = { content: [{ text: 'hello again' }], role: 'model' as const, metadata: {} };
+    const fifthMessage = { content: [{ text: 'hi again again' }], role: 'user' as const, metadata: {} };
+    const sixthMessage = { content: [{ text: 'hello again again' }], role: 'model' as const, metadata: {} };
+
+    const sessionData = {
+      id: sessionId,
+      state: { user: 'Bob' },
+      threads: {
+        main: [
+          firstMessage, secondMessage, thirdMessage, fourthMessage, fifthMessage, sixthMessage,
+        ],
+      },
+    };
+
+    await store.save(sessionId, sessionData);
+
+    // -- set window size 2
+    store.setWindowSize(2);
+
+    // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
+    const graphResult = await neo4jSession.run(
+      `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
+       MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
+       RETURN s, lastNode, firstNode`,
+      { sessionId }
+    );
+    expect(graphResult.records.length).toBe(1);
+    const lastNode = graphResult.records[0].get('lastNode');
+    const firstNode = graphResult.records[0].get('firstNode');
+    expect(lastNode).toBeDefined();
+    expect(firstNode).toBeDefined();
+
+    // Verify the retrieved data via the get method
+    const retrievedData = await store.get(sessionId);
+    console.log('Retrieved Data:', retrievedData);
+
+    // expected only last 3 messages
+    const expectedRetrievedData = {
+      id: sessionId,
+      state: { user: 'Bob' },
+      threads: {
+        main: [
+          thirdMessage, fourthMessage, fifthMessage, sixthMessage,
+        ],
+      },
+    };
+    expect(retrievedData).toEqual(expectedRetrievedData);
+
+    // -- cleanup: reset with default size
+    store.setWindowSize(Neo4jSessionStore.DEFAULT_SIZE);
+  });
+
+  test('should remove messages', async () => {
+    const sessionId = 'test-session-1';
+    const message = { content: [{ text: 'hi' }], role: 'user' as const, metadata: {} };
+
+    const sessionData = {
+      id: sessionId,
+      state: { user: 'Bob' },
+      threads: {
+        main: [
+          message,
+        ],
+      },
+    };
+
+    await store.save(sessionId, sessionData);
+
+    // -- set size 1
+    store.setWindowSize(2);
+
+    const graphMessageQuery = `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
+       MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
+       RETURN s, lastNode, firstNode`;
+
+    // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
+    const graphResult = await neo4jSession.run(
+      graphMessageQuery,
+      { sessionId }
+    );
+    expect(graphResult.records.length).toBe(1);
+    const lastNode = graphResult.records[0].get('lastNode');
+    const firstNode = graphResult.records[0].get('firstNode');
+    expect(lastNode).toBeDefined();
+    expect(firstNode).toBeDefined();
+
+    // Verify the retrieved data via the get method
+    const retrievedData = await store.get(sessionId);
+    console.log('Retrieved Data:', retrievedData);
+
+    expect(retrievedData).toEqual(sessionData);
+
+    // -- delete messages
+    await store.clear(sessionId);
+
+    const retrievedDataAfterDelete = await store.get(sessionId);
+    expect(retrievedDataAfterDelete).toBeUndefined();
+
+    const graphResultAfterDelete = await neo4jSession.run(
+      graphMessageQuery,
+      { sessionId }
+    );
+    expect(graphResultAfterDelete.records.length).toBe(0);
+
+  })
+
+
   test('should return undefined for a non-existent session', async () => {
     const sessionId = 'non-existent-session';
     const retrievedData = await store.get(sessionId);
@@ -125,7 +238,7 @@ describe('Neo4jSessionStore', () => {
       { sessionId }
     );
     expect(sessionNodesCount.records[0].get('count').toInt()).toBe(1);
-    
+
     // Verify the total message nodes is 2
     const messageNodesCount = await neo4jSession.run(
       `MATCH (n:\`${config.messageLabel}\` {threadId: 'main'}) RETURN count(n) AS count`
@@ -145,14 +258,14 @@ describe('Neo4jSessionStore', () => {
     const retrievedData = await store.get(sessionId);
     const expectedData = updatedData;
     expectedData.threads = {
-        main: [
-          ...initialData.threads.main,
-          { content: [{ text: 'hi' }], role: 'user' as const, metadata: {} },
-        ],
-      }
+      main: [
+        ...initialData.threads.main,
+        { content: [{ text: 'hi' }], role: 'user' as const, metadata: {} },
+      ],
+    }
     expect(retrievedData).toEqual(expectedData);
   });
-  
+
   test('should work with custom node labels', async () => {
     const customConfig = {
       ...config,
