@@ -3,23 +3,25 @@ import { v4 as uuidv4 } from "uuid";
 import * as neo4j_driver from "neo4j-driver";
 import { Neo4jGraphConfig } from "genkitx-neo4j";
 
-export interface GraphRagRetrieverConfig {
+export interface GraphRagConfig {
   systemPrompt: string;
   cypherQuery: string;
   idMetadataKey: string;
   cypherIdParamName: string;
   cypherReturnTextField: string;
   cypherReturnIdField?: string;
-  model?: any; 
+  useHyDE?: boolean;
+  hydePrompt?: string;
+  model?: any;
 }
 
-export abstract class BaseNeo4jGraphRagRetriever {
+export class GenericGraphRagRetriever {
   constructor(
     protected ai: ReturnType<typeof genkit>,
     protected neo4jConfig: Neo4jGraphConfig,
     protected indexerRef: any,
     protected vectorRetrieverRef: any,
-    protected ragConfig: GraphRagRetrieverConfig
+    protected config: GraphRagConfig
   ) {}
 
   public getNeo4jInstance() {
@@ -30,28 +32,30 @@ export abstract class BaseNeo4jGraphRagRetriever {
   }
 
   public getSystemPrompt(): string {
-    return this.ragConfig.systemPrompt;
-  }
-
-  abstract ingestDocument(params: {
-    documents: { id?: string; text: string; metadata?: any }[];
-  }): Promise<any>;
-
-  protected async getInitialVectorDocs(query: string, k: number): Promise<Document[]> {
-    return await this.ai.retrieve({
-      retriever: this.vectorRetrieverRef,
-      query: query,
-      options: { k }
-    });
+    return this.config.systemPrompt;
   }
 
   async retrieve(query: string, k: number = 3): Promise<Document[]> {
-    const vectorResults = await this.getInitialVectorDocs(query, k * 2);
+    let searchQuery = query;
+
+    if (this.config.useHyDE && this.config.model) {
+      const hypotheticalResponse = await this.ai.generate({
+        model: this.config.model,
+        prompt: this.config.hydePrompt + ` "${query}"`,
+      });
+      searchQuery = hypotheticalResponse.text;
+    }
+
+    const vectorResults = await this.ai.retrieve({
+      retriever: this.vectorRetrieverRef,
+      query: searchQuery,
+      options: { k: k * 2 }
+    });
 
     const ids = [
       ...new Set(
         vectorResults
-          .map(doc => doc.metadata?.[this.ragConfig.idMetadataKey])
+          .map(doc => doc.metadata?.[this.config.idMetadataKey])
           .filter(Boolean)
       )
     ];
@@ -63,11 +67,11 @@ export abstract class BaseNeo4jGraphRagRetriever {
     const session = this.getNeo4jInstance().session();
     
     const cypherParams = {
-      [this.ragConfig.cypherIdParamName]: ids
+      [this.config.cypherIdParamName]: ids
     };
     
     const result = await session.run(
-      this.ragConfig.cypherQuery, 
+      this.config.cypherQuery, 
       cypherParams
     );
     
@@ -75,11 +79,11 @@ export abstract class BaseNeo4jGraphRagRetriever {
 
     return result.records.map(record => 
       new Document({
-        content: [{ text: record.get(this.ragConfig.cypherReturnTextField) }],
+        content: [{ text: record.get(this.config.cypherReturnTextField) }],
         metadata: { 
           source: this.constructor.name, 
-          graphId: this.ragConfig.cypherReturnIdField 
-            ? record.get(this.ragConfig.cypherReturnIdField) 
+          graphId: this.config.cypherReturnIdField 
+            ? record.get(this.config.cypherReturnIdField) 
             : undefined 
         }
       })
@@ -87,13 +91,12 @@ export abstract class BaseNeo4jGraphRagRetriever {
   }
 }
 
-export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
+export class ParentChildRetriever extends GenericGraphRagRetriever {
   constructor(
     ai: ReturnType<typeof genkit>,
     neo4jConfig: Neo4jGraphConfig,
     indexerRef: any,
-    vectorRetrieverRef: any,
-    model?: any
+    vectorRetrieverRef: any
   ) {
     super(ai, neo4jConfig, indexerRef, vectorRetrieverRef, {
       systemPrompt: "You are an expert assistant. Use the provided parent-child context to answer the user's question. If the answer is not in the context, state it clearly.",
@@ -182,7 +185,7 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
   }
 }
 
-export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
+export class HypotheticalQuestionRetriever extends GenericGraphRagRetriever {
   constructor(
     ai: ReturnType<typeof genkit>,
     neo4jConfig: Neo4jGraphConfig,
@@ -201,20 +204,9 @@ export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
       `,
       cypherReturnTextField: "text",
       cypherReturnIdField: "docId",
-      // model: model 
-    });
-  }
-
-  protected async getInitialVectorDocs(query: string, k: number): Promise<Document[]> {
-    const hypotheticalResponse = await this.ai.generate({
-      model: this.ragConfig.model, 
-      prompt: `Write a brief hypothetical paragraph perfectly answering this question: "${query}". It does not need to be factual, just capture relevant vocabulary.`,
-    });
-
-    return await this.ai.retrieve({
-      retriever: this.vectorRetrieverRef,
-      query: hypotheticalResponse.text, 
-      options: { k }
+      useHyDE: true,
+      model: model,
+      hydePrompt: "Write a brief hypothetical paragraph perfectly answering this question. It does not need to be factual, just capture relevant vocabulary:"
     });
   }
 

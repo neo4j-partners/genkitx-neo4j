@@ -5,7 +5,7 @@ import { neo4j, neo4jHyDERetrieverRef, neo4jIndexerRef, neo4jParentChildRetrieve
 
 import { mockEmbedder } from '../dummyEmbedder';
 import { fail } from 'assert';
-import { HypotheticalQuestionRetriever, ParentChildRetriever } from '../rag-utils';
+import { GenericGraphRagRetriever, HypotheticalQuestionRetriever, ParentChildRetriever } from '../rag-utils';
 import { geminiModel, setupNeo4jTestEnvironment } from '../test-utils';
 import { googleAI } from '@genkit-ai/googleai';
 
@@ -20,9 +20,8 @@ import { googleAI } from '@genkit-ai/googleai';
  * The Neo4j instance must be running and accessible.
  */
 
-describe("Neo4j RAG Retrievers", () => {
-
-  const indexId = 'genkit-test-index';
+describe("Neo4j RAG Retrievers", () => {  const indexId = 'genkit-test-index';
+  
   const INDEXER_REF = neo4jIndexerRef({ indexId });
   const VECTOR_RETRIEVER_REF = neo4jRetrieverRef({ indexId });
   const PC_RETRIEVER_REF = neo4jParentChildRetrieverRef({ indexId });
@@ -30,13 +29,12 @@ describe("Neo4j RAG Retrievers", () => {
 
   const setupCtx = setupNeo4jTestEnvironment('5.26.16', indexId);
 
-  test("Genkit Native retrieve() with ParentChild", async () => {
+  test("retrieve with ParentChildRetriever", async () => {
     const pcRetriever = new ParentChildRetriever(
       setupCtx.ai, 
       setupCtx.clientParams, 
       INDEXER_REF, 
-      VECTOR_RETRIEVER_REF,
-      geminiModel
+      VECTOR_RETRIEVER_REF
     );
     
     const docText = "Protocol X-99 is an advanced security system using quantum encryption. Only level 5 executives can disable it with code Alpha-Bravo.";
@@ -65,9 +63,9 @@ describe("Neo4j RAG Retrievers", () => {
     const answer = response.text.toLowerCase();
     expect(answer).toContain("level 5");
     expect(answer).toContain("alpha-bravo");
-  });
+  }, 30000); 
 
-  test("Genkit Native retrieve() with HyDE", async () => {
+  test("retrieve() with HypotheticalQuestionRetriever", async () => {
     const hydeRetriever = new HypotheticalQuestionRetriever(
       setupCtx.ai, 
       setupCtx.clientParams, 
@@ -96,150 +94,65 @@ describe("Neo4j RAG Retrievers", () => {
 
     const answer = response.text.toLowerCase();
     expect(answer).toContain("methane");
-  });
+  }, 30000);
 
+  test("retrieve with GenericGraphRagRetriever (Custom Traversal)", async () => {
+    const genericRetriever = new GenericGraphRagRetriever(
+      setupCtx.ai,
+      setupCtx.clientParams,
+      INDEXER_REF,
+      VECTOR_RETRIEVER_REF,
+      {
+        systemPrompt: "Answer the question using ONLY the provided related context.",
+        idMetadataKey: "docId",
+        cypherIdParamName: "startIds",
+        cypherQuery: `
+          MATCH (start:Document)-[:RELATES_TO]->(related:Document)
+          WHERE start.id IN $startIds
+          RETURN related.text AS customText
+        `,
+        cypherReturnTextField: "customText"
+      }
+    );
 
-  // test("Genkit Native retrieve() with ParentChild", async () => {
-  //   // 1. Ingestion (Puoi usare la classe direttamente o il Tool nativo)
-  //   const pcRetriever = new ParentChildRetriever(setupCtx.ai, setupCtx.clientParams, INDEXER_REF, VECTOR_RETRIEVER_REF);
-  //   const docText = "Protocol X-99 is an advanced security system. Only level 5 executives can disable it.";
-  //   await pcRetriever.ingestDocument({ documents: [{ text: docText }] });
+    const doc1Id = 'custom-doc-1';
+    const doc2Id = 'custom-doc-2';
 
-  //   const userQuestion = "How do I disable protocol X-99?";
+    await setupCtx.ai.index({
+      indexer: INDEXER_REF,
+      documents: [
+        new Document({ 
+          content: [{ text: "The secret key is hidden in the vault." }], 
+          metadata: { docId: doc1Id } 
+        })
+      ]
+    });
 
-  //   // 2. NATIVE GENKIT RETRIEVAL
-  //   const retrievedDocs = await setupCtx.ai.retrieve({
-  //     retriever: PC_RETRIEVER_REF, // <-- Usa il ref nativo!
-  //     query: userQuestion,
-  //     options: { k: 3 }
-  //   });
+    const session = genericRetriever.getNeo4jInstance().session();
+    await session.run(`
+      MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The secret key is hidden in the vault."
+      MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The vault is located behind the painting in the library."
+      MERGE (d1)-[:RELATES_TO]->(d2)
+    `, { doc1Id, doc2Id });
+    await session.close();
+
+    const userQuestion = "Where is the vault located?";
     
-  //   expect(retrievedDocs.length).toBeGreaterThan(0);
-  //   expect(retrievedDocs[0].content[0].text).toContain("Protocol X-99");
-
-  //   // 3. GENERATION
-  //   const response = await setupCtx.ai.generate({
-  //     prompt: `${pcRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
-  //     docs: retrievedDocs, 
-  //   });
-
-  //   expect(response.text.toLowerCase()).toContain("level 5");
-  // });
-
-  // test("Genkit Native retrieve() with HyDE", async () => {
-  //   const hydeRetriever = new HypotheticalQuestionRetriever(setupCtx.ai, setupCtx.clientParams, INDEXER_REF, VECTOR_RETRIEVER_REF);
-  //   await hydeRetriever.ingestDocument({ documents: [{ text: "Planet Zeta atmosphere consists of 80% methane." }] });
-
-  //   const userQuestion = "What would I breathe if I visited Zeta?";
-
-  //   // NATIVE GENKIT RETRIEVAL
-  //   const retrievedDocs = await setupCtx.ai.retrieve({
-  //     retriever: HYDE_RETRIEVER_REF, // <-- Usa il ref nativo!
-  //     query: userQuestion,
-  //     options: { k: 3 }
-  //   });
-
-  //   const response = await setupCtx.ai.generate({
-  //     prompt: `${hydeRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
-  //     docs: retrievedDocs, 
-  //   });
-
-  //   expect(response.text.toLowerCase()).toContain("methane");
-  // });
-
-  // test("HypotheticalQuestionRetriever ingests and retrieves documents", async () => {
-  //   const retriever = new HypotheticalQuestionRetriever(setupCtx.ai, setupCtx.clientParams, INDEXER_REF, VECTOR_RETRIEVER_REF);
-
-  //   const uniqueId = `hq-doc-${Date.now()}`;
-  //   const docText = "This is a test document for the hypothetical question retriever.";
-
-  //   await retriever.ingestDocument({ documents: [{ text: docText, metadata: { uniqueId } }] });
-
-  //   const session = retriever.getNeo4jInstance().session();
-  //   const result = await session.run(retriever.getRetrievalQuery());
-  //   const records = result.records;
-  //   console.log('records...', records.map((r) => r.get("d").properties))
-
-  //   expect(records.length).toBeGreaterThan(0);
-
-  //   const foundText = records.map((r) => r.get("d").properties.text).join(" ");
-  //   expect(foundText).toContain("hypothetical question retriever");
-
-  //   await session.close();
-  // });
-
-  // test("ParentChildRetriever indexing works with Genkit", async () => {
-  //   const retriever = new ParentChildRetriever(setupCtx.ai, setupCtx.clientParams, INDEXER_REF, VECTOR_RETRIEVER_REF);
-
-  //   const uniqueId = `pc-index-doc-${Date.now()}`;
-  //   const docText = "This document will be indexed in Genkit via ParentChildRetriever.";
-
-  //   await retriever.ingestDocument({ documents: [{ text: docText, metadata: { uniqueId } }] });
-
-  //   const retrieverRef = neo4jRetrieverRef({ indexId });
-  //   const results = await setupCtx.ai.retrieve({
-  //     retriever: retrieverRef,
-  //     query: "indexed in Genkit",
-  //     options: { k: 10, filter: { uniqueId } },
-  //   });
-
-  //   expect(results.length).toBeGreaterThan(0);
-  //   expect(results[0].content[0].text).toContain("indexed in Genkit");
-  // });
-
-  // test("Full RAG Loop with ParentChildRetriever", async () => {
-  //   const pcRetriever = new ParentChildRetriever(
-  //     setupCtx.ai, 
-  //     setupCtx.clientParams, 
-  //     INDEXER_REF, 
-  //     VECTOR_RETRIEVER_REF
-  //   );
-
-  //   const docText = "Protocol X-99 is an advanced security system using quantum encryption. Only level 5 executives can disable it with code Alpha-Bravo.";
+    const retrievedDocs = await genericRetriever.retrieve(userQuestion, 3);
     
-  //   await pcRetriever.ingestDocument({
-  //     documents: [{ text: docText, metadata: { topic: "security" } }]
-  //   });
+    expect(retrievedDocs.length).toBeGreaterThan(0);
+    expect(retrievedDocs[0].content[0].text).toContain("behind the painting");
 
-  //   const userQuestion = "How do I disable protocol X-99 and who can do it?";
-  //   const retrievedDocs = await pcRetriever.retrieve(userQuestion);
-    
-  //   expect(retrievedDocs.length).toBeGreaterThan(0);
-  //   expect(retrievedDocs[0].content[0].text).toContain("Protocol X-99");
+    const response = await setupCtx.ai.generate({
+      model: geminiModel,
+      prompt: `${genericRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs,
+    });
 
-  //   const response = await setupCtx.ai.generate({
-  //     prompt: `${pcRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
-  //     docs: retrievedDocs, 
-  //   });
-
-  //   const answer = response.text.toLowerCase();
-  //   expect(answer).toContain("level 5");
-  //   expect(answer).toContain("alpha-bravo");
-  // });
-
-  // test("Full RAG Loop with HypotheticalQuestionRetriever (HyDE)", async () => {
-  //   const hydeRetriever = new HypotheticalQuestionRetriever(
-  //     setupCtx.ai, 
-  //     setupCtx.clientParams, 
-  //     INDEXER_REF, 
-  //     VECTOR_RETRIEVER_REF
-  //   );
-
-  //   await hydeRetriever.ingestDocument({
-  //     documents: [{ text: "Planet Zeta orbits a brown dwarf. Its atmosphere consists of 80% methane." }]
-  //   });
-
-  //   const userQuestion = "What would I breathe if I visited Zeta?";
-  //   const retrievedDocs = await hydeRetriever.retrieve(userQuestion);
-
-  //   const response = await setupCtx.ai.generate({
-  //     prompt: `${hydeRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
-  //     docs: retrievedDocs, 
-  //   });
-
-  //   const answer = response.text.toLowerCase();
-  //   expect(answer).toContain("methane");
-  // });
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("painting");
+    expect(answer).toContain("library");
+  }, 30000);
 });
 
 

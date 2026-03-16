@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -85,14 +85,6 @@ export const neo4jHyDERetrieverRef = (params: {
   });
 };
 
-/**
- * neo4jIndexerRef function creates an indexer for Neo4j.
- * @param params The params for the new Neo4j indexer.
- * @param params.indexId The indexId for the Neo4j indexer.
- * @param params.displayName  A display name for the indexer.
-If not specified, the default label will be `Neo4j - <indexId>`
- * @returns A reference to a Neo4j indexer.
- */
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
@@ -126,17 +118,6 @@ export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   ragModel?: any;
 }
 
-/**
- * Neo4j plugin that provides a Neo4j retriever and indexer
- * @param params An array of params to set up Neo4j retrievers and indexers
- * @param params.clientParams Neo4jConfiguration containing the
-username, password, and url. If not set, the NEO4J_URI, NEO4J_USERNAME,
-and NEO4J_PASSWORD environment variable will be used instead.
- * @param params.indexId The name of the index
- * @param params.embedder The embedder to use for the indexer and retriever
- * @param params.embedderOptions  Options to customize the embedder
- * @returns The Neo4j Genkit plugin
- */
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
   params: Neo4jParams<EmbedderCustomOptions>[],
 ): GenkitPlugin {
@@ -144,7 +125,6 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
     params.map((i) => configureNeo4jRetriever(ai, i));
     params.map((i) => configureNeo4jIndexer(ai, i));
     
-    // Register Genkit GraphRAG Retrievers & Tools
     params.map((i) => configureNeo4jGraphRagRetrievers(ai, i));
     params.map((i) => configureNeo4jGraphRagTools(ai, i));
   });
@@ -167,7 +147,7 @@ export function configureNeo4jGraphRagRetrievers<EmbedderCustomOptions extends z
       configSchema: Neo4jRetrieverOptionsSchema,
     },
     async (content, options) => {
-      const pcRetriever = new ParentChildRetriever(ai, neo4jConfig, indexer, vectorRetriever, ragModel);
+      const pcRetriever = new ParentChildRetriever(ai, neo4jConfig, indexer, vectorRetriever);
       const documents = await pcRetriever.retrieve(content.text ?? '', options?.k);
       return { documents };
     }
@@ -190,7 +170,7 @@ export function configureNeo4jGraphRagTools<EmbedderCustomOptions extends z.ZodT
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
 ) {
-  const { indexId } = params;
+  const { indexId, ragModel } = params;
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
   const indexer = neo4jIndexerRef({ indexId });
   const vectorRetriever = neo4jRetrieverRef({ indexId });
@@ -212,7 +192,7 @@ export function configureNeo4jGraphRagTools<EmbedderCustomOptions extends z.ZodT
       description: "Ingest documents for HyDE retrieval in Neo4j",
     },
     async ({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) => {
-      const hydeRetriever = new HypotheticalQuestionRetriever(ai, neo4jConfig, indexer, vectorRetriever);
+      const hydeRetriever = new HypotheticalQuestionRetriever(ai, neo4jConfig, indexer, vectorRetriever, ragModel);
       return await hydeRetriever.ingestDocument({ documents });
     }
   );
@@ -231,7 +211,6 @@ export function configureNeo4jRetriever<
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password),
   );
   
-  // Default to VectorFunctionStrategy
   const strategy = searchStrategy || new VectorFunctionStrategy();
 
   return ai.defineRetriever(
@@ -246,7 +225,6 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      // Delegate query generation to the strategy
       const retriever_query = strategy.generateQuery(options, params, content?.text ?? '');
       
       const response = await neo4j_instance.executeQuery(
@@ -303,7 +281,6 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
               CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
               WITH collect({node:node, score:score}) AS nodes, max(score) AS max
               UNWIND nodes AS n
-              // We use 0 as min
               RETURN n.node AS node, (n.score / max) AS score 
               UNION
               CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery, {limit: $k}) YIELD node, score
@@ -322,8 +299,6 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
     const query = isHybrid
       ? hybridQuery
       : vectorQuery;
-
-    isHybrid && console.log("Generated Query name:", fullTextIndexName);
 
     const additionalParams = isHybrid
       ? { fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName }
@@ -356,19 +331,6 @@ const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
   return { query: indexQuery, additionalParams: fParams };
 }
 
-
-/**
- * Configures a Neo4j indexer.
- * @param ai A Genkit instance
- * @param params The params for the indexer
- * @param params.indexId The name of the indexer
- * @param params.clientParams Neo4jConfiguration containing the
-username, password, and url. If not set, the NEO4J_URI, NEO4J_USERNAME,
-and NEO4J_PASSWORD environment variable will be used instead.
- * @param params.embedder The embedder to use for the retriever
- * @param params.embedderOptions  Options to customize the embedder
- * @returns A Genkit indexer
- */
 export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
@@ -451,7 +413,6 @@ export function configureNeo4jIndexer<
 
       let withMetadataClause = "";
       if (filterMetadata.length > 0) {
-        // Mappa le chiavi nell'array in formato n.`chiave` e le unisce con la virgola
         const metadataProps = filterMetadata.map(key => `n.\`${key}\``).join(", ");
         withMetadataClause = ` WITH [${metadataProps}]`;
       }
@@ -473,8 +434,6 @@ export function configureNeo4jIndexer<
           FOR (n:\`${labelName}\`)
           ON EACH [n.\`${textProperty}\`]
           `;
-          console.log("Creating fulltext index:", fullTextIndexQuery);
-          console.log("With name:", fullTextIndexName);
         await neo4j_instance.executeQuery(
           fullTextIndexQuery,
           { fullTextIndexName: fullTextIndexName },
