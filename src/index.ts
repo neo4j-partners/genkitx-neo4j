@@ -26,16 +26,17 @@ import {
   indexerRef,
   retrieverRef,
 } from "genkit/retriever";
-import { constructMetadataFilter } from "./filter-utils";
 import { randomUUID } from 'crypto';
+import { SearchStrategy, VectorFunctionStrategy } from "./search-strategy";
+import { constructMetadataFilter } from "./filter-utils";
+import { ParentChildRetriever, HypotheticalQuestionRetriever } from "./rag-utils";
 
-const FULLTEXT_INDEX_SUFFIX = "__fulltext";
-export const errorMetadataAndHybrid = "Metadata filtering can't be use in combination with a hybrid search approach."
+export const FULLTEXT_INDEX_SUFFIX = "__fulltext";
+export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
 });
-
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -48,14 +49,6 @@ export interface Neo4jGraphConfig {
   database?: string;
 }
 
-/**
- * neo4jRetrieverRef function creates a retriever for Neo4j.
- * @param params The params for the new Neo4j retriever
- * @param params.indexId The indexId for the Neo4j retriever
- * @param params.displayName  A display name for the retriever.
-If not specified, the default label will be `Neo4j - <indexId>`
- * @returns A reference to a Neo4j retriever.
- */
 export const neo4jRetrieverRef = (params: {
   indexId: string;
   displayName?: string;
@@ -66,6 +59,28 @@ export const neo4jRetrieverRef = (params: {
     info: {
       label: params.displayName ?? `Neo4j - ${params.indexId}`,
     },
+    configSchema: Neo4jRetrieverOptionsSchema,
+  });
+};
+
+export const neo4jParentChildRetrieverRef = (params: {
+  indexId: string;
+  displayName?: string;
+}) => {
+  return retrieverRef({
+    name: `neo4j-parent-child/${params.indexId}`,
+    info: { label: params.displayName ?? `Neo4j Parent-Child - ${params.indexId}` },
+    configSchema: Neo4jRetrieverOptionsSchema,
+  });
+};
+
+export const neo4jHyDERetrieverRef = (params: {
+  indexId: string;
+  displayName?: string;
+}) => {
+  return retrieverRef({
+    name: `neo4j-hyde/${params.indexId}`,
+    info: { label: params.displayName ?? `Neo4j HyDE - ${params.indexId}` },
     configSchema: Neo4jRetrieverOptionsSchema,
   });
 };
@@ -91,7 +106,7 @@ export const neo4jIndexerRef = (params: {
   });
 };
 
-interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
+export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   indexId: string;
   embedder: EmbedderArgument<EmbedderCustomOptions>;
   embedderOptions?: z.infer<EmbedderCustomOptions>;
@@ -106,6 +121,9 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   fullTextRetrievalQuery?: string;
   fullTextIndexName?: string;
   fullTextQuery?: string;
+  searchStrategy?: SearchStrategy;
+  filterMetadata?: string[];
+  ragModel?: any;
 }
 
 /**
@@ -125,111 +143,97 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
   return genkitPlugin("neo4j", async (ai: Genkit) => {
     params.map((i) => configureNeo4jRetriever(ai, i));
     params.map((i) => configureNeo4jIndexer(ai, i));
-
-    // Register optional Parent-Child ingestor tool
-    params.forEach((param) => {
-      const neo4jConfig = param.clientParams ?? getDefaultConfig();
-      const neo4j_instance = neo4j_driver.driver(
-        neo4jConfig.url,
-        neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password),
-      );
-
-      ai.defineTool(
-        {
-          name: `neo4j/${param.indexId}/parentChildIngestor`,
-          description: "Ingest documents with parent-child-subchunk structure in Neo4j",
-        },
-        async ({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) => {
-          // Lazy import chunk with a clear error if missing
-          let chunk: any;
-          try {
-            ({ chunk } = await import("llm-chunk"));
-          } catch (err) {
-            throw new Error(
-              "The 'llm-chunk' package is not installed. " +
-              "To use the Parent-Child ingestor, install it with:\n\n" +
-              "npm install llm-chunk\n" +
-              "or\n" +
-              "yarn add llm-chunk"
-            );
-          }
-
-          const session = neo4j_instance.session();
-
-          const chunkingConfig = {
-            minLength: 1000,
-            maxLength: 2000,
-            splitter: 'sentence',
-            overlap: 100,
-            delimiters: '',
-          } as any;
-
-          for (const doc of documents) {
-            const docId = doc.id ?? randomUUID();
-            const chunks = await chunk(doc.text, chunkingConfig);
-
-            for (const chunkText of chunks) {
-              const chunkId = randomUUID();
-              const subChunks = await chunk(chunkText, { ...chunkingConfig, minLength: 300, maxLength: 500, overlap: 50 });
-              const embeddings = await Promise.all(subChunks.map(s => ai.embed({ embedder: param.embedder, content: s, options: param.embedderOptions })));
-
-              await session.run(
-                `MERGE (d:Document {id: $docId})
-                 ON CREATE SET d.createdAt = timestamp(), d.metadata = $metadata
-                 MERGE (c:Chunk {id: $chunkId})
-                 SET c.text = $chunkText
-                 MERGE (d)-[:HAS_CHUNK]->(c)`,
-                { docId, metadata: doc.metadata ?? {}, chunkId, chunkText },
-              );
-
-              for (let i = 0; i < subChunks.length; i++) {
-                const subId = randomUUID();
-                const embedding = embeddings[i][0].embedding;
-                await session.run(
-                  `MERGE (s:SubChunk {id: $subId})
-                   SET s.text = $text, s.embedding = $embedding
-                   MERGE (c:Chunk {id: $chunkId})
-                   MERGE (c)-[:HAS_SUBCHUNK]->(s)`,
-                  { subId, text: subChunks[i], embedding, chunkId },
-                );
-              }
-            }
-          }
-
-          await session.close();
-          return { status: "ok", count: documents.length };
-        },
-      );
-    });
+    
+    // Register Genkit GraphRAG Retrievers & Tools
+    params.map((i) => configureNeo4jGraphRagRetrievers(ai, i));
+    params.map((i) => configureNeo4jGraphRagTools(ai, i));
   });
 }
 
 export default neo4j;
 
-/**
- * Configures a Neo4j retriever.
- * @param ai A Genkit instance
- * @param params The params for the retriever
- * @param params.indexId The name of the retriever
- * @param params.clientParams PNeo4jConfiguration containing the
-username, password, and url. If not set, the NEO4J_URI, NEO4J_USERNAME,
-and NEO4J_PASSWORD environment variable will be used instead.
- * @param params.embedder The embedder to use for the retriever
- * @param params.embedderOptions  Options to customize the embedder
- * @returns A Pinecone retriever
- */
+export function configureNeo4jGraphRagRetrievers<EmbedderCustomOptions extends z.ZodTypeAny>(
+  ai: Genkit,
+  params: Neo4jParams<EmbedderCustomOptions>,
+) {
+  const { indexId, ragModel } = params;
+  const neo4jConfig = params.clientParams ?? getDefaultConfig();
+  const indexer = neo4jIndexerRef({ indexId });
+  const vectorRetriever = neo4jRetrieverRef({ indexId });
+
+  ai.defineRetriever(
+    {
+      name: `neo4j-parent-child/${indexId}`,
+      configSchema: Neo4jRetrieverOptionsSchema,
+    },
+    async (content, options) => {
+      const pcRetriever = new ParentChildRetriever(ai, neo4jConfig, indexer, vectorRetriever, ragModel);
+      const documents = await pcRetriever.retrieve(content.text ?? '', options?.k);
+      return { documents };
+    }
+  );
+
+  ai.defineRetriever(
+    {
+      name: `neo4j-hyde/${indexId}`,
+      configSchema: Neo4jRetrieverOptionsSchema,
+    },
+    async (content, options) => {
+      const hydeRetriever = new HypotheticalQuestionRetriever(ai, neo4jConfig, indexer, vectorRetriever, ragModel);
+      const documents = await hydeRetriever.retrieve(content.text ?? '', options?.k);
+      return { documents };
+    }
+  );
+}
+
+export function configureNeo4jGraphRagTools<EmbedderCustomOptions extends z.ZodTypeAny>(
+  ai: Genkit,
+  params: Neo4jParams<EmbedderCustomOptions>,
+) {
+  const { indexId } = params;
+  const neo4jConfig = params.clientParams ?? getDefaultConfig();
+  const indexer = neo4jIndexerRef({ indexId });
+  const vectorRetriever = neo4jRetrieverRef({ indexId });
+
+  ai.defineTool(
+    {
+      name: `neo4j/${indexId}/parentChildIngestor`,
+      description: "Ingest documents with parent-child-subchunk structure in Neo4j",
+    },
+    async ({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) => {
+      const pcRetriever = new ParentChildRetriever(ai, neo4jConfig, indexer, vectorRetriever);
+      return await pcRetriever.ingestDocument({ documents });
+    }
+  );
+
+  ai.defineTool(
+    {
+      name: `neo4j/${indexId}/hydeIngestor`,
+      description: "Ingest documents for HyDE retrieval in Neo4j",
+    },
+    async ({ documents }: { documents: { id?: string; text: string; metadata?: any }[] }) => {
+      const hydeRetriever = new HypotheticalQuestionRetriever(ai, neo4jConfig, indexer, vectorRetriever);
+      return await hydeRetriever.ingestDocument({ documents });
+    }
+  );
+}
+
 export function configureNeo4jRetriever<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
 ) {
-  const { indexId, embedder, embedderOptions, retrievalQuery } = { ...params };
+  const { indexId, embedder, embedderOptions, searchStrategy } = { ...params };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
   const neo4j_instance = neo4j_driver.driver(
     neo4jConfig.url,
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password),
   );
+  
+  // Default to VectorFunctionStrategy
+  const strategy = searchStrategy || new VectorFunctionStrategy();
+
   return ai.defineRetriever(
     {
       name: `neo4j/${params.indexId}`,
@@ -242,7 +246,9 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, params, content?.text ?? '');
+      // Delegate query generation to the strategy
+      const retriever_query = strategy.generateQuery(options, params, content?.text ?? '');
+      
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -253,7 +259,7 @@ export function configureNeo4jRetriever<
         },
         { database: neo4jConfig.database },
       );
-
+      
       const documents = response.records.map((el) => {
         return Document.fromText(
           el.get("text"),
@@ -369,8 +375,9 @@ export function configureNeo4jIndexer<
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId,
-    embedder,
+  const { 
+    indexId, 
+    embedder, 
     embedderOptions,
     embeddingProperty = 'embedding',
     idProperty = 'id',
@@ -379,6 +386,8 @@ export function configureNeo4jIndexer<
     searchType = 'vector',
     fullTextIndexName = indexId + FULLTEXT_INDEX_SUFFIX,
     fullTextQuery,
+    searchStrategy,
+    filterMetadata = []
   } = {
     ...params,
   };
@@ -388,8 +397,13 @@ export function configureNeo4jIndexer<
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password),
   );
 
+  const strategy = searchStrategy || new VectorFunctionStrategy();
+  const cypherPrefix = strategy.cypherPrefix();
+
   return ai.defineIndexer(
-    { name: `neo4j/${params.indexId}` },
+    {
+      name: `neo4j/${params.indexId}`,
+    },
     async (docs, options) => {
       const embeddings = await Promise.all(
         docs.map((doc) =>
@@ -435,11 +449,20 @@ export function configureNeo4jIndexer<
         );
       }
 
+      let withMetadataClause = "";
+      if (filterMetadata.length > 0) {
+        // Mappa le chiavi nell'array in formato n.`chiave` e le unisce con la virgola
+        const metadataProps = filterMetadata.map(key => `n.\`${key}\``).join(", ");
+        withMetadataClause = ` WITH [${metadataProps}]`;
+      }
+
+      const createVectorIndexQuery = `
+      ${cypherPrefix}CREATE VECTOR INDEX $indexName IF NOT EXISTS
+      FOR (n:\`${labelName}\`) ON (n.\`${embeddingProperty}\`)${withMetadataClause}
+            `.trim();
+
       await neo4j_instance.executeQuery(
-        `
-        CREATE VECTOR INDEX $indexName IF NOT EXISTS
-        FOR (n:\`${labelName}\`) ON n.embedding
-        `,
+        createVectorIndexQuery,
         { indexName: indexId },
         { database: neo4jConfig.database },
       );
@@ -477,5 +500,4 @@ function getDefaultConfig() {
   return { url, username, password, ...(database && { database }) };
 }
 
-type SearchType = "vector" | "hybrid"
-
+type SearchType = "vector" | "hybrid";

@@ -2,23 +2,25 @@ import { genkit, Document } from "genkit";
 import { v4 as uuidv4 } from "uuid";
 import * as neo4j_driver from "neo4j-driver";
 import { Neo4jGraphConfig } from "genkitx-neo4j";
-import { neo4jIndexerRef } from "."; // adjust import path
 
-/**
- * Base class for Neo4j RAG retrievers
- */
+export interface GraphRagRetrieverConfig {
+  systemPrompt: string;
+  cypherQuery: string;
+  idMetadataKey: string;
+  cypherIdParamName: string;
+  cypherReturnTextField: string;
+  cypherReturnIdField?: string;
+  model?: any; 
+}
+
 export abstract class BaseNeo4jGraphRagRetriever {
   constructor(
     protected ai: ReturnType<typeof genkit>,
     protected neo4jConfig: Neo4jGraphConfig,
-    protected indexerRef: ReturnType<typeof neo4jIndexerRef>
+    protected indexerRef: any,
+    protected vectorRetrieverRef: any,
+    protected ragConfig: GraphRagRetrieverConfig
   ) {}
-
-  abstract ingestDocument(params: {
-    documents: { id?: string; text: string; metadata?: any }[];
-  }): Promise<any>;
-  abstract getRetrievalQuery(): string;
-  abstract getPrompt(): string;
 
   public getNeo4jInstance() {
     return neo4j_driver.driver(
@@ -26,25 +28,97 @@ export abstract class BaseNeo4jGraphRagRetriever {
       neo4j_driver.auth.basic(this.neo4jConfig.username, this.neo4jConfig.password)
     );
   }
+
+  public getSystemPrompt(): string {
+    return this.ragConfig.systemPrompt;
+  }
+
+  abstract ingestDocument(params: {
+    documents: { id?: string; text: string; metadata?: any }[];
+  }): Promise<any>;
+
+  protected async getInitialVectorDocs(query: string, k: number): Promise<Document[]> {
+    return await this.ai.retrieve({
+      retriever: this.vectorRetrieverRef,
+      query: query,
+      options: { k }
+    });
+  }
+
+  async retrieve(query: string, k: number = 3): Promise<Document[]> {
+    const vectorResults = await this.getInitialVectorDocs(query, k * 2);
+
+    const ids = [
+      ...new Set(
+        vectorResults
+          .map(doc => doc.metadata?.[this.ragConfig.idMetadataKey])
+          .filter(Boolean)
+      )
+    ];
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const session = this.getNeo4jInstance().session();
+    
+    const cypherParams = {
+      [this.ragConfig.cypherIdParamName]: ids
+    };
+    
+    const result = await session.run(
+      this.ragConfig.cypherQuery, 
+      cypherParams
+    );
+    
+    await session.close();
+
+    return result.records.map(record => 
+      new Document({
+        content: [{ text: record.get(this.ragConfig.cypherReturnTextField) }],
+        metadata: { 
+          source: this.constructor.name, 
+          graphId: this.ragConfig.cypherReturnIdField 
+            ? record.get(this.ragConfig.cypherReturnIdField) 
+            : undefined 
+        }
+      })
+    );
+  }
 }
 
-/**
- * Parent-Child Retriever
- */
 export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
+  constructor(
+    ai: ReturnType<typeof genkit>,
+    neo4jConfig: Neo4jGraphConfig,
+    indexerRef: any,
+    vectorRetrieverRef: any,
+    model?: any
+  ) {
+    super(ai, neo4jConfig, indexerRef, vectorRetrieverRef, {
+      systemPrompt: "You are an expert assistant. Use the provided parent-child context to answer the user's question. If the answer is not in the context, state it clearly.",
+      idMetadataKey: "chunkId",
+      cypherIdParamName: "chunkIds",
+      cypherQuery: `
+        MATCH (c:Chunk)
+        WHERE c.id IN $chunkIds
+        RETURN c.text AS parentText, c.id AS chunkId
+      `,
+      cypherReturnTextField: "parentText",
+      cypherReturnIdField: "chunkId"
+    });
+  }
+
   async ingestDocument({
     documents,
   }: {
     documents: { id?: string; text: string; metadata?: any }[];
   }) {
-    // Lazy import of llm-chunk
     let chunk: any;
     try {
       ({ chunk } = await import("llm-chunk"));
     } catch (err) {
-      throw new Error(
-        "The 'llm-chunk' package is not installed. To use ParentChildRetriever, run:\n\nnpm install llm-chunk\nor\nyarn add llm-chunk"
-      );
+      throw new Error("You must install 'llm-chunk'.");
     }
 
     const session = this.getNeo4jInstance().session();
@@ -53,8 +127,7 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
       minLength: 1000,
       maxLength: 2000,
       splitter: "sentence",
-      overlap: 100,
-      delimiters: "",
+      overlap: 100
     } as any;
 
     for (const doc of documents) {
@@ -67,19 +140,24 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
           ...chunkingConfig,
           minLength: 300,
           maxLength: 500,
-          overlap: 50,
+          overlap: 50
         });
 
-        // Index subchunks via Genkit + plugin embedder
         const documentsToIndex = subChunks.map(
-          (sub) => new Document({ content: [{ text: sub }], metadata: doc.metadata ?? {} })
+          (sub) => new Document({ 
+            content: [{ text: sub }], 
+            metadata: { ...doc.metadata, docId, chunkId }
+          })
         );
-        await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
+        
+        await this.ai.index({
+          indexer: this.indexerRef,
+          documents: documentsToIndex
+        });
 
-        // Create parent-child structure in Neo4j
         await session.run(
           `MERGE (d:Document {id: $docId})
-           ON CREATE SET d.createdAt = timestamp(), d.metadata = $metadata
+           ON CREATE SET d.createdAt = timestamp(), d += $metadata
            MERGE (c:Chunk {id: $chunkId})
            SET c.text = $chunkText
            MERGE (d)-[:HAS_CHUNK]->(c)`,
@@ -102,24 +180,44 @@ export class ParentChildRetriever extends BaseNeo4jGraphRagRetriever {
     await session.close();
     return { status: "ok", count: documents.length };
   }
-
-  getRetrievalQuery(): string {
-    return `
-      MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
-      OPTIONAL MATCH (c)-[:HAS_SUBCHUNK]->(s:SubChunk)
-      RETURN d, c, collect(s) as subChunks
-    `;
-  }
-
-  getPrompt(): string {
-    return "Use the retrieved parent-child document structure to answer the question:";
-  }
 }
 
-/**
- * Hypothetical Question Retriever
- */
 export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
+  constructor(
+    ai: ReturnType<typeof genkit>,
+    neo4jConfig: Neo4jGraphConfig,
+    indexerRef: any,
+    vectorRetrieverRef: any,
+    model?: any
+  ) {
+    super(ai, neo4jConfig, indexerRef, vectorRetrieverRef, {
+      systemPrompt: "Answer the question using ONLY the retrieved documents. Be concise and direct.",
+      idMetadataKey: "docId",
+      cypherIdParamName: "docIds",
+      cypherQuery: `
+        MATCH (d:Document)
+        WHERE d.id IN $docIds
+        RETURN d.text AS text, d.id AS docId
+      `,
+      cypherReturnTextField: "text",
+      cypherReturnIdField: "docId",
+      // model: model 
+    });
+  }
+
+  protected async getInitialVectorDocs(query: string, k: number): Promise<Document[]> {
+    const hypotheticalResponse = await this.ai.generate({
+      model: this.ragConfig.model, 
+      prompt: `Write a brief hypothetical paragraph perfectly answering this question: "${query}". It does not need to be factual, just capture relevant vocabulary.`,
+    });
+
+    return await this.ai.retrieve({
+      retriever: this.vectorRetrieverRef,
+      query: hypotheticalResponse.text, 
+      options: { k }
+    });
+  }
+
   async ingestDocument({
     documents,
   }: {
@@ -127,34 +225,27 @@ export class HypotheticalQuestionRetriever extends BaseNeo4jGraphRagRetriever {
   }) {
     const session = this.getNeo4jInstance().session();
 
-    // Index documents via Genkit + plugin embedder
-    const documentsToIndex = documents.map(
-      (doc) => new Document({ content: [{ text: doc.text }], metadata: doc.metadata ?? {} })
-    );
-    await this.ai.index({ indexer: this.indexerRef, documents: documentsToIndex });
-
-    // In Neo4j, just store documents as nodes (no subchunk logic)
     for (const doc of documents) {
       const docId = doc.id ?? uuidv4();
+      
+      await this.ai.index({ 
+        indexer: this.indexerRef, 
+        documents: [
+          new Document({
+            content: [{ text: doc.text }],
+            metadata: { docId, ...doc.metadata }
+          })
+        ] 
+      });
+
       await session.run(
         `MERGE (d:Document {id: $docId})
-         SET d.text = $text, d.metadata = $metadata`,
+         SET d.text = $text, d += $metadata`,
         { docId, text: doc.text, metadata: doc.metadata ?? {} }
       );
     }
-
+    
     await session.close();
-    return { status: "ok", count: documents.length };
-  }
-
-  getRetrievalQuery(): string {
-    return `
-      MATCH (d:Document)
-      RETURN d
-    `;
-  }
-
-  getPrompt(): string {
-    return "Answer the question hypothetically based on the retrieved documents:";
+    return { status: "ok" };
   }
 }

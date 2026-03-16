@@ -18,7 +18,7 @@
   "description": "Genkit AI framework plugin for Neo4j Graph database",
   "type": "commonjs",
   "scripts": {
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "check": "tsc",
     "compile": "tsup-node",
     "build:clean": "rimraf ./lib",
