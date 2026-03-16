@@ -25,16 +25,15 @@ import {
   indexerRef,
   retrieverRef,
 } from "genkit/retriever";
-import { constructMetadataFilter } from "./filter-utils";
 import { randomUUID } from 'crypto';
+import { SearchStrategy, VectorFunctionStrategy } from "./search-strategy";
 
-const FULLTEXT_INDEX_SUFFIX = "__fulltext";
+export const FULLTEXT_INDEX_SUFFIX = "__fulltext";
 export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
 });
-
 
 const Neo4jIndexerOptionsSchema = z.object({
   namespace: z.string().optional(),
@@ -47,14 +46,6 @@ export interface Neo4jGraphConfig {
   database?: string;
 }
 
-/**
- * neo4jRetrieverRef function creates a retriever for Neo4j.
- * @param params The params for the new Neo4j retriever
- * @param params.indexId The indexId for the Neo4j retriever
- * @param params.displayName  A display name for the retriever.
-If not specified, the default label will be `Neo4j - <indexId>`
- * @returns A reference to a Neo4j retriever.
- */
 export const neo4jRetrieverRef = (params: {
   indexId: string;
   displayName?: string;
@@ -85,11 +76,10 @@ export const neo4jIndexerRef = (params: {
     info: {
       label: params.displayName ?? `Neo4j - ${params.indexId}`,
     },
-    //configSchema: Neo4jIndexerOptionsSchema.optional(),
   });
 };
 
-interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
+export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   indexId: string;
   embedder: EmbedderArgument<EmbedderCustomOptions>;
   embedderOptions?: z.infer<EmbedderCustomOptions>;
@@ -98,11 +88,13 @@ interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   textProperty?: string;
   embeddingProperty?: string;
   idProperty?: string;
-  retrievalQuery?: string
+  retrievalQuery?: string;
   searchType?: SearchType;
   fullTextRetrievalQuery?: string;
   fullTextIndexName?: string;
   fullTextQuery?: string;
+  searchStrategy?: SearchStrategy;
+  filterMetadata?: string[];
 }
 
 /**
@@ -127,32 +119,22 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 
 export default neo4j;
 
-/**
- * Configures a Neo4j retriever.
- * @param ai A Genkit instance
- * @param params The params for the retriever
- * @param params.indexId The name of the retriever
- * @param params.clientParams PNeo4jConfiguration containing the
-username, password, and url. If not set, the NEO4J_URI, NEO4J_USERNAME,
-and NEO4J_PASSWORD environment variable will be used instead.
- * @param params.embedder The embedder to use for the retriever
- * @param params.embedderOptions  Options to customize the embedder
- * @returns A Pinecone retriever
- */
 export function configureNeo4jRetriever<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
 ) {
-  const { indexId, embedder, embedderOptions } = {
-    ...params,
-  };
+  const { indexId, embedder, embedderOptions, searchStrategy } = { ...params };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
   const neo4j_instance = neo4j_driver.driver(
     neo4jConfig.url, // URL (protocol://host:port)
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password), // Authentication
   );
+  
+  // Default to VectorFunctionStrategy
+  const strategy = searchStrategy || new VectorFunctionStrategy();
+
   return ai.defineRetriever(
     {
       name: `neo4j/${params.indexId}`,
@@ -165,7 +147,9 @@ export function configureNeo4jRetriever<
         options: embedderOptions,
       });
 
-      const retriever_query = retrieverQuery(options, params, content?.text ?? '');
+      // Delegate query generation to the strategy
+      const retriever_query = strategy.generateQuery(options, params, content?.text ?? '');
+      
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -178,7 +162,7 @@ export function configureNeo4jRetriever<
           database: neo4jConfig.database,
         },
       );
-      // Create documents properly by returning the result from map
+      
       const documents = response.records.map((el) => {
         return Document.fromText(
           el.get("text"),
@@ -195,107 +179,14 @@ export function configureNeo4jRetriever<
   );
 }
 
-const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
-  options: {
-    filter?: Record<string, any> | undefined;
-    k?: number | undefined;
-  },
-  params: Neo4jParams<EmbedderCustomOptions>,
-  content: string,
-): {query: string, additionalParams: Record<string, any>} => {
-  const filter = options.filter;
-  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text', fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX } = params;
-
-  const nodeLabel = label || indexId;
-  
-  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null,
-      embedding: Null, id: Null } AS metadata`;
-
-  const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
-  const isHybrid = params?.searchType === 'hybrid';
-  if (params?.fullTextQuery == undefined && content == undefined) {
-    throw new Error("Neither fullTextQuery nor content is defined for hybrid search.");
-  }
-
-  if (filter == null) {
-      const hybridQuery =`
-          CALL {
-              CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
-              WITH collect({node:node, score:score}) AS nodes, max(score) AS max
-              UNWIND nodes AS n
-              // We use 0 as min
-              RETURN n.node AS node, (n.score / max) AS score 
-              UNION
-              CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery, {limit: $k}) YIELD node, score
-              WITH collect({node: node, score: score}) AS nodes, max(score) AS max
-              UNWIND nodes AS n
-              RETURN n.node AS node, (n.score / max) AS score
-          }
-          WITH node, max(score) AS score ORDER BY score DESC LIMIT toInteger($k)
-          ${fullTextRetrievalQuery}`
-
-    const vectorQuery = `
-      CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
-      ${retrievalQuery}
-      `;
-      
-    const query = isHybrid
-      ? hybridQuery
-      : vectorQuery;
-
-    isHybrid && console.log("Generated Query name:", fullTextIndexName);
-      
-    const additionalParams = isHybrid
-      ? {fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName}
-      : {};
-
-    return { query, additionalParams };
-  }
-
-  if (isHybrid) {
-    throw new Error(errorMetadataAndHybrid);
-  }
-  
-  const baseIndexQuery = `
-    CYPHER runtime = parallel parallelRuntimeSupport=all 
-    MATCH (n:\`${nodeLabel}\`)
-    WHERE n.\`${embeddingProperty}\` IS NOT NULL
-    AND
-  `;
-
-  const baseCosineQuery = `
-    WITH n as node, vector.similarity.cosine(
-      n.\`${embeddingProperty}\`,
-      $embedding
-    ) AS score ORDER BY score DESC LIMIT toInteger($k)
-  `;
-  const [fSnippets, fParams] = constructMetadataFilter(filter);
-
-  const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
-
-  return {query: indexQuery, additionalParams: fParams};
-}
-
-
-/**
- * Configures a Neo4j indexer.
- * @param ai A Genkit instance
- * @param params The params for the indexer
- * @param params.indexId The name of the indexer
- * @param params.clientParams Neo4jConfiguration containing the
-username, password, and url. If not set, the NEO4J_URI, NEO4J_USERNAME,
-and NEO4J_PASSWORD environment variable will be used instead.
- * @param params.embedder The embedder to use for the retriever
- * @param params.embedderOptions  Options to customize the embedder
- * @returns A Genkit indexer
- */
 export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { indexId, 
+  const { 
+    indexId, 
     embedder, 
     embedderOptions,
     embeddingProperty = 'embedding',
@@ -305,19 +196,23 @@ export function configureNeo4jIndexer<
     searchType = 'vector',
     fullTextIndexName = indexId + FULLTEXT_INDEX_SUFFIX,
     fullTextQuery,
+    searchStrategy,
+    filterMetadata = []
   } = {
     ...params,
   };
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
   const neo4j_instance = neo4j_driver.driver(
-    neo4jConfig.url, // URL (protocol://host:port)
-    neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password), // Authentication
+    neo4jConfig.url, 
+    neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password), 
   );
+
+  const strategy = searchStrategy || new VectorFunctionStrategy();
+  const cypherPrefix = strategy.cypherPrefix();
 
   return ai.defineIndexer(
     {
       name: `neo4j/${params.indexId}`,
-      //configSchema: neo4jIndexerOptionsSchema.optional(),
     },
     async (docs, options) => {
       const embeddings = await Promise.all(
@@ -362,11 +257,20 @@ export function configureNeo4jIndexer<
         );
       }
 
+      let withMetadataClause = "";
+      if (filterMetadata.length > 0) {
+        // Mappa le chiavi nell'array in formato n.`chiave` e le unisce con la virgola
+        const metadataProps = filterMetadata.map(key => `n.\`${key}\``).join(", ");
+        withMetadataClause = ` WITH [${metadataProps}]`;
+      }
+
+      const createVectorIndexQuery = `
+      ${cypherPrefix}CREATE VECTOR INDEX $indexName IF NOT EXISTS
+      FOR (n:\`${labelName}\`) ON (n.\`${embeddingProperty}\`)${withMetadataClause}
+            `.trim();
+
       await neo4j_instance.executeQuery(
-        `
-        CREATE VECTOR INDEX $indexName IF NOT EXISTS
-        FOR (n:\`${labelName}\`) ON n.embedding
-        `,
+        createVectorIndexQuery,
         { indexName: indexId },
         { database: neo4jConfig.database },
       );
@@ -414,5 +318,5 @@ function getDefaultConfig() {
   };
 }
 
-type SearchType = "vector" | "hybrid"
+type SearchType = "vector" | "hybrid";
 
