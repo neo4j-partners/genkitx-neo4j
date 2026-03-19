@@ -253,84 +253,6 @@ export function configureNeo4jRetriever<
   );
 }
 
-const retrieverQuery = <EmbedderCustomOptions extends z.ZodTypeAny>(
-  options: {
-    filter?: Record<string, any> | undefined;
-    k?: number | undefined;
-  },
-  params: Neo4jParams<EmbedderCustomOptions>,
-  content: string,
-): { query: string, additionalParams: Record<string, any> } => {
-  const filter = options.filter;
-  const { indexId, label, embeddingProperty = 'embedding', textProperty = 'text', fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX } = params;
-
-  const nodeLabel = label || indexId;
-
-  const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null,
-      embedding: Null, id: Null } AS metadata`;
-
-  const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
-  const isHybrid = params?.searchType === 'hybrid';
-  if (params?.fullTextQuery == undefined && content == undefined) {
-    throw new Error("Neither fullTextQuery nor content is defined for hybrid search.");
-  }
-
-  if (filter == null) {
-    const hybridQuery = `
-          CALL {
-              CALL db.index.vector.queryNodes($index, $k * 5, $embedding) YIELD node, score
-              WITH collect({node:node, score:score}) AS nodes, max(score) AS max
-              UNWIND nodes AS n
-              RETURN n.node AS node, (n.score / max) AS score 
-              UNION
-              CALL db.index.fulltext.queryNodes("${fullTextIndexName}", $fullTextQuery, {limit: $k}) YIELD node, score
-              WITH collect({node: node, score: score}) AS nodes, max(score) AS max
-              UNWIND nodes AS n
-              RETURN n.node AS node, (n.score / max) AS score
-          }
-          WITH node, max(score) AS score ORDER BY score DESC LIMIT toInteger($k)
-          ${fullTextRetrievalQuery}`
-
-    const vectorQuery = `
-      CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
-      ${retrievalQuery}
-      `;
-
-    const query = isHybrid
-      ? hybridQuery
-      : vectorQuery;
-
-    const additionalParams = isHybrid
-      ? { fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName }
-      : {};
-
-    return { query, additionalParams };
-  }
-
-  if (isHybrid) {
-    throw new Error(errorMetadataAndHybrid);
-  }
-
-  const baseIndexQuery = `
-    CYPHER runtime = parallel parallelRuntimeSupport=all 
-    MATCH (n:\`${nodeLabel}\`)
-    WHERE n.\`${embeddingProperty}\` IS NOT NULL
-    AND
-  `;
-
-  const baseCosineQuery = `
-    WITH n as node, vector.similarity.cosine(
-      n.\`${embeddingProperty}\`,
-      $embedding
-    ) AS score ORDER BY score DESC LIMIT toInteger($k)
-  `;
-
-  const [fSnippets, fParams] = constructMetadataFilter(filter);
-  const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
-
-  return { query: indexQuery, additionalParams: fParams };
-}
-
 export function configureNeo4jIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
 >(
@@ -447,7 +369,12 @@ export function configureNeo4jIndexer<
 }
 
 function getDefaultConfig() {
-  const { NEO4J_URI: url, NEO4J_USERNAME: username, NEO4J_PASSWORD: password, NEO4J_DATABASE: database } = process.env;
+  const {
+    NEO4J_URI: url,
+    NEO4J_USERNAME: username,
+    NEO4J_PASSWORD: password,
+    NEO4J_DATABASE: database,
+  } = process.env;
 
   if (!url || !username || !password) {
     throw new Error(
@@ -456,7 +383,12 @@ function getDefaultConfig() {
     );
   }
 
-  return { url, username, password, ...(database && { database }) };
+  return {
+    url,
+    username,
+    password,
+    ...(database && { database }),
+  };
 }
 
 type SearchType = "vector" | "hybrid";
