@@ -28,8 +28,7 @@ import {
 } from "genkit/retriever";
 import { randomUUID } from 'crypto';
 import { SearchStrategy, VectorFunctionStrategy } from "./search-strategy";
-import { constructMetadataFilter } from "./filter-utils";
-import { ParentChildRetriever, HypotheticalQuestionRetriever } from "./rag-utils";
+import { ParentChildRetriever, HypotheticalQuestionRetriever, GenericGraphRagRetriever, GraphRagConfig } from "./rag-utils";
 
 export const FULLTEXT_INDEX_SUFFIX = "__fulltext";
 export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
@@ -85,6 +84,18 @@ export const neo4jHyDERetrieverRef = (params: {
   });
 };
 
+export const neo4jCustomRetrieverRef = (params: {
+  indexId: string;
+  name: string;
+  displayName?: string;
+}) => {
+  return retrieverRef({
+    name: `neo4j-custom-${params.name}/${params.indexId}`,
+    info: { label: params.displayName ?? `Neo4j Custom - ${params.name}` },
+    configSchema: Neo4jRetrieverOptionsSchema,
+  });
+};
+
 export const neo4jIndexerRef = (params: {
   indexId: string;
   displayName?: string;
@@ -116,6 +127,7 @@ export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   searchStrategy?: SearchStrategy;
   filterMetadata?: string[];
   ragModel?: any;
+  customGraphRagConfigs?: Record<string, GraphRagConfig>;
 }
 
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
@@ -136,7 +148,7 @@ export function configureNeo4jGraphRagRetrievers<EmbedderCustomOptions extends z
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>,
 ) {
-  const { indexId, ragModel } = params;
+  const { indexId, ragModel, customGraphRagConfigs } = params;
   const neo4jConfig = params.clientParams ?? getDefaultConfig();
   const indexer = neo4jIndexerRef({ indexId });
   const vectorRetriever = neo4jRetrieverRef({ indexId });
@@ -164,6 +176,22 @@ export function configureNeo4jGraphRagRetrievers<EmbedderCustomOptions extends z
       return { documents };
     }
   );
+
+  if (customGraphRagConfigs) {
+    for (const [name, config] of Object.entries(customGraphRagConfigs)) {
+      ai.defineRetriever(
+        {
+          name: `neo4j-custom-${name}/${indexId}`,
+          configSchema: Neo4jRetrieverOptionsSchema,
+        },
+        async (content, options) => {
+          const genericRetriever = new GenericGraphRagRetriever(ai, neo4jConfig, indexer, vectorRetriever, config);
+          const documents = await genericRetriever.retrieve(content.text ?? '', options?.k);
+          return { documents };
+        }
+      );
+    }
+  }
 }
 
 export function configureNeo4jGraphRagTools<EmbedderCustomOptions extends z.ZodTypeAny>(

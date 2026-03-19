@@ -1,7 +1,7 @@
 
 import { Document, genkit } from 'genkit';
 import { test, describe, expect } from '@jest/globals';
-import { neo4j, neo4jHyDERetrieverRef, neo4jIndexerRef, neo4jParentChildRetrieverRef, neo4jRetrieverRef } from '..';
+import { configureNeo4jGraphRagRetrievers, neo4j, neo4jCustomRetrieverRef, neo4jHyDERetrieverRef, neo4jIndexerRef, neo4jParentChildRetrieverRef, neo4jRetrieverRef } from '..';
 
 import { mockEmbedder } from '../dummyEmbedder';
 import { fail } from 'assert';
@@ -20,7 +20,8 @@ import { googleAI } from '@genkit-ai/googleai';
  * The Neo4j instance must be running and accessible.
  */
 
-describe("Neo4j RAG Retrievers", () => {  const indexId = 'genkit-test-index';
+describe("Neo4j RAG Retrievers", () => {  
+  const indexId = 'genkit-test-index';
   
   const INDEXER_REF = neo4jIndexerRef({ indexId });
   const VECTOR_RETRIEVER_REF = neo4jRetrieverRef({ indexId });
@@ -152,6 +153,131 @@ describe("Neo4j RAG Retrievers", () => {  const indexId = 'genkit-test-index';
     const answer = response.text.toLowerCase();
     expect(answer).toContain("painting");
     expect(answer).toContain("library");
+  }, 30000);
+
+  test("Custom retriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const customConfigName = "sibling-search";
+    const customPrompt = "Use the sibling documents to answer the question.";
+
+    configureNeo4jGraphRagRetrievers(setupCtx.ai, {
+      indexId: indexId,
+      embedder: null as any, 
+      clientParams: setupCtx.clientParams,
+      customGraphRagConfigs: {
+        [customConfigName]: {
+          systemPrompt: customPrompt,
+          idMetadataKey: "docId",
+          cypherIdParamName: "startIds",
+          cypherQuery: `
+            MATCH (start:Document)-[:SIBLING_OF]->(sibling:Document)
+            WHERE start.id IN $startIds
+            RETURN sibling.text AS siblingText
+          `,
+          cypherReturnTextField: "siblingText"
+        }
+      }
+    });
+
+    const doc1Id = 'sibling-doc-1';
+    const doc2Id = 'sibling-doc-2';
+
+    await setupCtx.ai.index({
+      indexer: INDEXER_REF,
+      documents: [
+        new Document({ 
+          content: [{ text: "The treasure map is fake." }], 
+          metadata: { docId: doc1Id } 
+        })
+      ]
+    });
+
+    const session = setupCtx.driver.session();
+    await session.run(`
+      MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The treasure map is fake."
+      MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The real treasure map is under the floorboards."
+      MERGE (d1)-[:SIBLING_OF]->(d2)
+    `, { doc1Id, doc2Id });
+    await session.close();
+
+    const CUSTOM_RETRIEVER_REF = neo4jCustomRetrieverRef({ 
+      indexId, 
+      name: customConfigName 
+    });
+
+    const userQuestion = "Where is the real treasure map?";
+    
+    const retrievedDocs = await setupCtx.ai.retrieve({
+      retriever: CUSTOM_RETRIEVER_REF, 
+      query: "treasure map",
+      options: { k: 3 }
+    });
+    
+    expect(retrievedDocs.length).toBeGreaterThan(0);
+    expect(retrievedDocs[0].content[0].text).toContain("floorboards");
+
+    const response = await setupCtx.ai.generate({
+      model: geminiModel,
+      prompt: `${customPrompt}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs,
+    });
+
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("floorboards");
+  }, 30000);
+
+  test("ParentChildRetriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const pcRetriever = new ParentChildRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF
+    );
+
+    const uniqueId = `pc-index-doc-${Date.now()}`;
+    const docText = "This document will be indexed in Genkit via ParentChildRetriever to test native integration.";
+
+    await pcRetriever.ingestDocument({ 
+      documents: [{ text: docText, metadata: { uniqueId } }] 
+    });
+
+    const retrieverRef = neo4jRetrieverRef({ indexId });
+    
+    const results = await setupCtx.ai.retrieve({
+      retriever: retrieverRef,
+      query: "indexed in Genkit",
+      options: { k: 10, filter: { uniqueId } },
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content[0].text).toContain("indexed in Genkit via ParentChildRetriever");
+  }, 30000);
+
+  test("HypotheticalQuestionRetriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const hydeRetriever = new HypotheticalQuestionRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF,
+      geminiModel
+    );
+
+    const uniqueId = `hyde-index-doc-${Date.now()}`;
+    const docText = "This document will be indexed in Genkit via HypotheticalQuestionRetriever to test native integration.";
+
+    await hydeRetriever.ingestDocument({ 
+      documents: [{ text: docText, metadata: { uniqueId } }] 
+    });
+
+    const retrieverRef = neo4jRetrieverRef({ indexId });
+    
+    const results = await setupCtx.ai.retrieve({
+      retriever: retrieverRef,
+      query: "indexed in Genkit",
+      options: { k: 10, filter: { uniqueId } },
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content[0].text).toContain("indexed in Genkit via HypotheticalQuestionRetriever");
   }, 30000);
 });
 
