@@ -1,18 +1,287 @@
-import { googleAI } from '@genkit-ai/googleai';
+
 import { Document, genkit } from 'genkit';
-import { test, describe, expect, afterAll, beforeAll, beforeEach, afterEach } from '@jest/globals';
-import { neo4j, neo4jIndexerRef, neo4jRetrieverRef } from '..';
+import { test, describe, expect } from '@jest/globals';
+import { configureNeo4jGraphRagRetrievers, neo4j, neo4jCustomRetrieverRef, neo4jHyDERetrieverRef, neo4jIndexerRef, neo4jParentChildRetrieverRef, neo4jRetrieverRef } from '..';
 
 import { mockEmbedder } from '../dummyEmbedder';
 import { fail } from 'assert';
-import { setupNeo4jTestEnvironment } from '../test-utils';
-
+import { GenericGraphRagRetriever, HypotheticalQuestionRetriever, ParentChildRetriever } from '../rag-utils';
+import { geminiModel, setupNeo4jTestEnvironment } from '../test-utils';
+import { googleAI } from '@genkit-ai/googleai';
 
 /**
- * This file contains integration tests for the Genkit Neo4j plugin,
- * using @testcontainers/neo4j to spin up a disposable Docker Neo4j instance
- * for each test run.
+ * This file contains integration tests for the Genkit Neo4j plugin.
+ * To run these tests, ensure the following environment variables are set:
+ * - NEO4J_URI: The URI of the Neo4j instance (e.g., bolt://localhost:7689)
+ * - NEO4J_USERNAME: The username for Neo4j authentication
+ * - NEO4J_PASSWORD: The password for Neo4j authentication
+ * - GEMINI_API_KEY: Your Google Gemini API key
+ *
+ * The Neo4j instance must be running and accessible.
  */
+
+describe("Neo4j RAG Retrievers", () => {  
+  const indexId = 'genkit-test-index';
+  
+  const INDEXER_REF = neo4jIndexerRef({ indexId });
+  const VECTOR_RETRIEVER_REF = neo4jRetrieverRef({ indexId });
+  const PC_RETRIEVER_REF = neo4jParentChildRetrieverRef({ indexId });
+  const HYDE_RETRIEVER_REF = neo4jHyDERetrieverRef({ indexId });
+
+  const setupCtx = setupNeo4jTestEnvironment('5.26.16', indexId);
+
+  test("retrieve with ParentChildRetriever", async () => {
+    const pcRetriever = new ParentChildRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF
+    );
+    
+    const docText = "Protocol X-99 is an advanced security system using quantum encryption. Only level 5 executives can disable it with code Alpha-Bravo.";
+    
+    await pcRetriever.ingestDocument({
+      documents: [{ text: docText, metadata: { topic: "security" } }]
+    });
+
+    const userQuestion = "How do I disable protocol X-99 and who can do it?";
+    
+    const retrievedDocs = await setupCtx.ai.retrieve({
+      retriever: PC_RETRIEVER_REF, 
+      query: userQuestion,
+      options: { k: 3 }
+    });
+    
+    expect(retrievedDocs.length).toBeGreaterThan(0);
+    expect(retrievedDocs[0].content[0].text).toContain("Protocol X-99");
+
+    const response = await setupCtx.ai.generate({
+      model: geminiModel, 
+      prompt: `${pcRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs, 
+    });
+
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("level 5");
+    expect(answer).toContain("alpha-bravo");
+  }, 30000); 
+
+  test("retrieve() with HypotheticalQuestionRetriever", async () => {
+    const hydeRetriever = new HypotheticalQuestionRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF,
+      geminiModel 
+    );
+
+    await hydeRetriever.ingestDocument({
+      documents: [{ text: "Planet Zeta orbits a brown dwarf. Its atmosphere consists of 80% methane." }]
+    });
+
+    const userQuestion = "What would I breathe if I visited Zeta?";
+    
+    const retrievedDocs = await setupCtx.ai.retrieve({
+      retriever: HYDE_RETRIEVER_REF, 
+      query: userQuestion,
+      options: { k: 3 }
+    });
+
+    const response = await setupCtx.ai.generate({
+      model: geminiModel, 
+      prompt: `${hydeRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs, 
+    });
+
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("methane");
+  }, 30000);
+
+  test("retrieve with GenericGraphRagRetriever (Custom Traversal)", async () => {
+    const genericRetriever = new GenericGraphRagRetriever(
+      setupCtx.ai,
+      setupCtx.clientParams,
+      INDEXER_REF,
+      VECTOR_RETRIEVER_REF,
+      {
+        systemPrompt: "Answer the question using ONLY the provided related context.",
+        idMetadataKey: "docId",
+        cypherIdParamName: "startIds",
+        cypherQuery: `
+          MATCH (start:Document)-[:RELATES_TO]->(related:Document)
+          WHERE start.id IN $startIds
+          RETURN related.text AS customText
+        `,
+        cypherReturnTextField: "customText"
+      }
+    );
+
+    const doc1Id = 'custom-doc-1';
+    const doc2Id = 'custom-doc-2';
+
+    await setupCtx.ai.index({
+      indexer: INDEXER_REF,
+      documents: [
+        new Document({ 
+          content: [{ text: "The secret key is hidden in the vault." }], 
+          metadata: { docId: doc1Id } 
+        })
+      ]
+    });
+
+    const session = genericRetriever.getNeo4jInstance().session();
+    await session.run(`
+      MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The secret key is hidden in the vault."
+      MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The vault is located behind the painting in the library."
+      MERGE (d1)-[:RELATES_TO]->(d2)
+    `, { doc1Id, doc2Id });
+    await session.close();
+
+    const userQuestion = "Where is the vault located?";
+    
+    const retrievedDocs = await genericRetriever.retrieve(userQuestion, 3);
+    
+    expect(retrievedDocs.length).toBeGreaterThan(0);
+    expect(retrievedDocs[0].content[0].text).toContain("behind the painting");
+
+    const response = await setupCtx.ai.generate({
+      model: geminiModel,
+      prompt: `${genericRetriever.getSystemPrompt()}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs,
+    });
+
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("painting");
+    expect(answer).toContain("library");
+  }, 30000);
+
+  test("Custom retriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const customConfigName = "sibling-search";
+    const customPrompt = "Use the sibling documents to answer the question.";
+
+    configureNeo4jGraphRagRetrievers(setupCtx.ai, {
+      indexId: indexId,
+      embedder: null as any, 
+      clientParams: setupCtx.clientParams,
+      customGraphRagConfigs: {
+        [customConfigName]: {
+          systemPrompt: customPrompt,
+          idMetadataKey: "docId",
+          cypherIdParamName: "startIds",
+          cypherQuery: `
+            MATCH (start:Document)-[:SIBLING_OF]->(sibling:Document)
+            WHERE start.id IN $startIds
+            RETURN sibling.text AS siblingText
+          `,
+          cypherReturnTextField: "siblingText"
+        }
+      }
+    });
+
+    const doc1Id = 'sibling-doc-1';
+    const doc2Id = 'sibling-doc-2';
+
+    await setupCtx.ai.index({
+      indexer: INDEXER_REF,
+      documents: [
+        new Document({ 
+          content: [{ text: "The treasure map is fake." }], 
+          metadata: { docId: doc1Id } 
+        })
+      ]
+    });
+
+    const session = setupCtx.driver.session();
+    await session.run(`
+      MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The treasure map is fake."
+      MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The real treasure map is under the floorboards."
+      MERGE (d1)-[:SIBLING_OF]->(d2)
+    `, { doc1Id, doc2Id });
+    await session.close();
+
+    const CUSTOM_RETRIEVER_REF = neo4jCustomRetrieverRef({ 
+      indexId, 
+      name: customConfigName 
+    });
+
+    const userQuestion = "Where is the real treasure map?";
+    
+    const retrievedDocs = await setupCtx.ai.retrieve({
+      retriever: CUSTOM_RETRIEVER_REF, 
+      query: "treasure map",
+      options: { k: 3 }
+    });
+    
+    expect(retrievedDocs.length).toBeGreaterThan(0);
+    expect(retrievedDocs[0].content[0].text).toContain("floorboards");
+
+    const response = await setupCtx.ai.generate({
+      model: geminiModel,
+      prompt: `${customPrompt}\n\nUser Question: ${userQuestion}`,
+      docs: retrievedDocs,
+    });
+
+    const answer = response.text.toLowerCase();
+    expect(answer).toContain("floorboards");
+  }, 30000);
+
+  test("ParentChildRetriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const pcRetriever = new ParentChildRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF
+    );
+
+    const uniqueId = `pc-index-doc-${Date.now()}`;
+    const docText = "This document will be indexed in Genkit via ParentChildRetriever to test native integration.";
+
+    await pcRetriever.ingestDocument({ 
+      documents: [{ text: docText, metadata: { uniqueId } }] 
+    });
+
+    const retrieverRef = neo4jRetrieverRef({ indexId });
+    
+    const results = await setupCtx.ai.retrieve({
+      retriever: retrieverRef,
+      query: "indexed in Genkit",
+      options: { k: 10, filter: { uniqueId } },
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content[0].text).toContain("indexed in Genkit via ParentChildRetriever");
+  }, 30000);
+
+  test("HypotheticalQuestionRetriever indexing works with standard Genkit Retriever and filtering", async () => {
+    const hydeRetriever = new HypotheticalQuestionRetriever(
+      setupCtx.ai, 
+      setupCtx.clientParams, 
+      INDEXER_REF, 
+      VECTOR_RETRIEVER_REF,
+      geminiModel
+    );
+
+    const uniqueId = `hyde-index-doc-${Date.now()}`;
+    const docText = "This document will be indexed in Genkit via HypotheticalQuestionRetriever to test native integration.";
+
+    await hydeRetriever.ingestDocument({ 
+      documents: [{ text: docText, metadata: { uniqueId } }] 
+    });
+
+    const retrieverRef = neo4jRetrieverRef({ indexId });
+    
+    const results = await setupCtx.ai.retrieve({
+      retriever: retrieverRef,
+      query: "indexed in Genkit",
+      options: { k: 10, filter: { uniqueId } },
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content[0].text).toContain("indexed in Genkit via HypotheticalQuestionRetriever");
+  }, 30000);
+});
+
+
 describe('Neo4j Plugin Integration', () => {
 
   // Unique ID used for the vector index in Neo4j (corresponds to the node label)
@@ -165,8 +434,8 @@ describe('Neo4j Plugin Integration', () => {
 
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
-    
-    
+
+
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await setupCtx.session.run(verificationQuery);
 
@@ -183,7 +452,7 @@ describe('Neo4j Plugin Integration', () => {
         googleAI(),
         neo4j([
           {
-            indexId: customLabelIdx, 
+            indexId: customLabelIdx,
             embedder: mockEmbedder,
             clientParams: setupCtx.clientParams,
             label: customLabel,
@@ -219,7 +488,7 @@ describe('Neo4j Plugin Integration', () => {
     } catch (e) {
       console.log("Caught error as expected");
       expect(e).toBeInstanceOf(Error);
-      expect((e as Error).message).toBe("Metadata filtering can't be use in combination with a hybrid search approach."); 
+      expect((e as Error).message).toBe("Metadata filtering can't be use in combination with a hybrid search approach.");
     }
   })
 
@@ -261,8 +530,8 @@ describe('Neo4j Plugin Integration', () => {
     });
 
     expect(docs).toHaveLength(1);
-    expect(docs[0].content[0].text).toContain('indexing and retrieval');    
-    
+    expect(docs[0].content[0].text).toContain('indexing and retrieval');
+
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await setupCtx.session.run(verificationQuery);
     expect(result.records).toHaveLength(1);
@@ -317,8 +586,8 @@ describe('Neo4j Plugin Integration', () => {
 
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
-    
-    
+
+
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await setupCtx.session.run(verificationQuery);
 
@@ -354,7 +623,7 @@ describe('Neo4j Plugin Integration', () => {
             idProperty: customIdProperty,
             fullTextQuery: 'document',
             searchType: 'hybrid',
-            fullTextIndexName: 'customFullTextIndexName', 
+            fullTextIndexName: 'customFullTextIndexName',
           },
         ]),
       ],
@@ -382,8 +651,8 @@ describe('Neo4j Plugin Integration', () => {
 
     expect(docs).toHaveLength(1);
     expect(docs[0].content[0].text).toContain('indexing and retrieval');
-    
-    
+
+
     const verificationQuery = `MATCH (n:${customLabel}) RETURN n`;
     const result = await setupCtx.session.run(verificationQuery);
 
@@ -475,7 +744,7 @@ describe('Neo4j Plugin Integration', () => {
       options: {
         k: 10,
         // The filter does not match any property on the indexed nodes
-        filter: nonMatchingFilter, 
+        filter: nonMatchingFilter,
       },
     });
 

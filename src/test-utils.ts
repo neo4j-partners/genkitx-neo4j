@@ -3,7 +3,7 @@ import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
 import { Wait } from 'testcontainers';
 import { driver as neo4jDriver, auth, Driver, Session } from 'neo4j-driver';
 import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/googleai';
+import { gemini15Flash, googleAI } from '@genkit-ai/googleai';
 import { neo4j } from '.';
 import { mockEmbedder } from './dummyEmbedder';
 
@@ -14,6 +14,8 @@ export interface Neo4jTestStartupContext {
   ai: ReturnType<typeof genkit>;
   clientParams: any;
 }
+
+export const geminiModel = 'googleai/gemini-2.5-flash'
 
 export function setupNeo4jTestEnvironment(neo4jVersion: string = '2026.01.4', indexId: string = 'genkit-test-index'): Neo4jTestStartupContext {
   // We an empty object that will be populated by the hooks.
@@ -48,6 +50,7 @@ export function setupNeo4jTestEnvironment(neo4jVersion: string = '2026.01.4', in
             indexId,
             embedder: mockEmbedder,
             clientParams: setupCtx.clientParams,
+            ragModel: geminiModel
           },
         ]),
       ],
