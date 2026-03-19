@@ -1,15 +1,10 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
-import { Driver, auth, driver as neo4jDriver, Session } from 'neo4j-driver';
+import { describe, expect, test } from '@jest/globals';
+import { Session } from 'neo4j-driver';
 import { Neo4jSessionStore, Neo4jSessionStoreConfig } from '../session';
-import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
-import { Wait } from 'testcontainers';
+import { setupNeo4jTestEnvironment } from '../test-utils';
 
 
 describe('Neo4jSessionStore', () => {
-  // Reference to the Testcontainers Neo4j instance
-  let neo4jContainer: StartedNeo4jContainer;
-
-  let neo4jDriverInstance: Driver;
   let store: Neo4jSessionStore;
   let neo4jSession: Session;
   const config: Neo4jSessionStoreConfig = {
@@ -22,39 +17,18 @@ describe('Neo4jSessionStore', () => {
     lastMessageRelType: 'LAST_MESSAGE_TEST',
   };
 
-  beforeAll(async () => {
-    // 1. Start the Neo4j Docker container using Testcontainers.
-    // This automatically pulls the image and waits for the database to be ready.
-    neo4jContainer = await new Neo4jContainer('neo4j:5.26.16')
-      .withWaitStrategy(Wait.forLogMessage('Started.'))
-      .start();
-          
-    config.url = neo4jContainer.getBoltUri();
-    config.username = neo4jContainer.getUsername();
-    config.password = neo4jContainer.getPassword();
-
-    neo4jDriverInstance = neo4jDriver(
-      config.url,
-      auth.basic(config.username, config.password || ''),
-    );
-  }, 120000);
-
-  beforeEach(async () => {
-    store = new Neo4jSessionStore(config);
-    neo4jSession = neo4jDriverInstance.session();
-  });
-
-  afterEach(async () => {
-    try {
-      await neo4jSession.run(`MATCH (n) DETACH DELETE n`);
-    } finally {
-      await neo4jSession.close();
+  const setupCtx = setupNeo4jTestEnvironment(
+    '5.26.16', 
+    'genkit-test-index', 
+    (ctx) => {
+      config.url = ctx.neo4jContainer.getBoltUri();
+      config.username = ctx.neo4jContainer.getUsername();
+      config.password = ctx.neo4jContainer.getPassword();
+    },
+    (_) => {
+      store = new Neo4jSessionStore(config);
     }
-  });
-
-  afterAll(async () => {
-    await neo4jDriverInstance.close();
-  });
+  );
 
   test('should save and retrieve session data and verify the graph structure', async () => {
     const sessionId = 'test-session-1';
@@ -72,7 +46,7 @@ describe('Neo4jSessionStore', () => {
     await store.save(sessionId, sessionData);
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
-    const graphResult = await neo4jSession.run(
+    const graphResult = await setupCtx.session.run(
       `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
        MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
        RETURN s, lastNode, firstNode`,
@@ -115,7 +89,7 @@ describe('Neo4jSessionStore', () => {
     store.setWindowSize(2);
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
-    const graphResult = await neo4jSession.run(
+    const graphResult = await setupCtx.session.run(
       `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
        MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
        RETURN s, lastNode, firstNode`,
@@ -171,7 +145,7 @@ describe('Neo4jSessionStore', () => {
        RETURN s, lastNode, firstNode`;
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
-    const graphResult = await neo4jSession.run(
+    const graphResult = await setupCtx.session.run(
       graphMessageQuery,
       { sessionId }
     );
@@ -193,7 +167,7 @@ describe('Neo4jSessionStore', () => {
     const retrievedDataAfterDelete = await store.get(sessionId);
     expect(retrievedDataAfterDelete).toBeUndefined();
 
-    const graphResultAfterDelete = await neo4jSession.run(
+    const graphResultAfterDelete = await setupCtx.session.run(
       graphMessageQuery,
       { sessionId }
     );
@@ -233,20 +207,20 @@ describe('Neo4jSessionStore', () => {
     await store.save(sessionId, updatedData);
 
     // Verify there is only 1 Session node
-    const sessionNodesCount = await neo4jSession.run(
+    const sessionNodesCount = await setupCtx.session.run(
       `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId}) RETURN count(s) AS count`,
       { sessionId }
     );
     expect(sessionNodesCount.records[0].get('count').toInt()).toBe(1);
 
     // Verify the total message nodes is 2
-    const messageNodesCount = await neo4jSession.run(
+    const messageNodesCount = await setupCtx.session.run(
       `MATCH (n:\`${config.messageLabel}\` {threadId: 'main'}) RETURN count(n) AS count`
     );
     expect(messageNodesCount.records[0].get('count').toInt()).toBe(2);
 
     // Verify the LAST_MESSAGE relationship points to the final node
-    const lastNodeResult = await neo4jSession.run(
+    const lastNodeResult = await setupCtx.session.run(
       `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})-[:${config.lastMessageRelType}]->(m)
        RETURN m.content AS lastMessageContent`,
       { sessionId }
@@ -285,15 +259,15 @@ describe('Neo4jSessionStore', () => {
     await customStore.save(sessionId, sessionData);
 
     // Verify that the nodes were created with the custom labels
-    const sessionNodeCount = await neo4jSession.run(`MATCH (s:CustomSession {sessionId: $sessionId}) RETURN count(s) AS count`, { sessionId });
+    const sessionNodeCount = await setupCtx.session.run(`MATCH (s:CustomSession {sessionId: $sessionId}) RETURN count(s) AS count`, { sessionId });
     expect(sessionNodeCount.records[0].get('count').toInt()).toBe(1);
 
-    const messageNodeCount = await neo4jSession.run(`MATCH (m:CustomMessage {threadId: 'main'}) RETURN count(m) AS count`);
+    const messageNodeCount = await setupCtx.session.run(`MATCH (m:CustomMessage {threadId: 'main'}) RETURN count(m) AS count`);
     expect(messageNodeCount.records[0].get('count').toInt()).toBe(1);
 
     // Clean up nodes created with custom labels
-    await neo4jSession.run(`MATCH (n:CustomSession) DETACH DELETE n`);
-    await neo4jSession.run(`MATCH (n:CustomMessage) DETACH DELETE n`);
+    await setupCtx.session.run(`MATCH (n:CustomSession) DETACH DELETE n`);
+    await setupCtx.session.run(`MATCH (n:CustomMessage) DETACH DELETE n`);
   });
 
   test('should work with custom relationship types', async () => {
@@ -318,7 +292,7 @@ describe('Neo4jSessionStore', () => {
     await customStore.save(sessionId, sessionData);
 
     // Verify that the custom relationships exist
-    const relResult = await neo4jSession.run(
+    const relResult = await setupCtx.session.run(
       `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})-[:THREAD_HEAD]->(lastMsg)
        MATCH (s)-[:THREAD_HEAD]->(lastMsg)<-[:THREAD_NEXT]-(firstMsg)
        RETURN count(lastMsg) as lastMsgCount, count(firstMsg) as firstMsgCount`,
@@ -330,7 +304,7 @@ describe('Neo4jSessionStore', () => {
     expect(record.get('firstMsgCount').toInt()).toBe(1); // One NEXT relationship
 
     // Clean up nodes created with custom labels
-    await neo4jSession.run(`MATCH (n:\`${config.sessionLabel}\`) DETACH DELETE n`);
-    await neo4jSession.run(`MATCH (n:\`${config.messageLabel}\`) DETACH DELETE n`);
+    await setupCtx.session.run(`MATCH (n:\`${config.sessionLabel}\`) DETACH DELETE n`);
+    await setupCtx.session.run(`MATCH (n:\`${config.messageLabel}\`) DETACH DELETE n`);
   });
 });

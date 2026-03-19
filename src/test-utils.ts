@@ -15,7 +15,12 @@ export interface Neo4jTestStartupContext {
   clientParams: any;
 }
 
-export function setupNeo4jTestEnvironment(neo4jVersion: string = '2026.01.4', indexId: string = 'genkit-test-index'): Neo4jTestStartupContext {
+export function setupNeo4jTestEnvironment(
+  neo4jVersion: string = '2026.01.4',
+  indexId: string = 'genkit-test-index',
+  beforeAllCallback: (ctx: Neo4jTestStartupContext) => any = () => {},
+  beforeEachCallback: (ctx: Neo4jTestStartupContext) => any = () => {},
+): Neo4jTestStartupContext {
   // We an empty object that will be populated by the hooks.
   const setupCtx = {} as Neo4jTestStartupContext;
   const CLEANUP_QUERY = `MATCH (n) DETACH DELETE n`;
@@ -30,6 +35,8 @@ export function setupNeo4jTestEnvironment(neo4jVersion: string = '2026.01.4', in
     const password = setupCtx.neo4jContainer.getPassword();
 
     setupCtx.driver = neo4jDriver(uri, auth.basic(username, password));
+
+    beforeAllCallback(setupCtx)
   }, 120000);
 
   beforeEach(async () => {
@@ -54,6 +61,8 @@ export function setupNeo4jTestEnvironment(neo4jVersion: string = '2026.01.4', in
     });
 
     setupCtx.session = setupCtx.driver.session();
+
+    beforeEachCallback(setupCtx)
   });
 
   afterEach(async () => {
