@@ -10,6 +10,8 @@ export interface Neo4jSessionStoreConfig {
   messageLabel?: string;
   nextMessageRelType?: string;
   lastMessageRelType?: string;
+  firstMessageRelType?: string;
+  useTckFormat?: boolean;
 }
 
 export class Neo4jSessionStore<S = any> implements SessionStore<S> {
@@ -19,16 +21,20 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   private readonly messageLabel: string;
   private readonly nextMessageRelType: string;
   private readonly lastMessageRelType: string;
+  private readonly firstMessageRelType: string;
+  private readonly useTckFormat: boolean;
 
   public static readonly DEFAULT_SIZE = 100;
   private windowSize: number;
 
   constructor(config: Neo4jSessionStoreConfig) {
     this.config = config;
-    this.sessionLabel = config.sessionLabel || 'GenkitSession';
+    this.useTckFormat = config.useTckFormat ?? true;
+    this.sessionLabel = config.sessionLabel || (this.useTckFormat ? 'Session' : 'GenkitSession');
     this.messageLabel = config.messageLabel || 'Message';
-    this.nextMessageRelType = config.nextMessageRelType || 'NEXT';
+    this.nextMessageRelType = config.nextMessageRelType || (this.useTckFormat ? 'NEXT_MESSAGE' : 'NEXT');
     this.lastMessageRelType = config.lastMessageRelType || 'LAST_MESSAGE';
+    this.firstMessageRelType = config.firstMessageRelType || 'FIRST_MESSAGE';
     this.driver = neo4jDriver(
       this.config.url,
       auth.basic(this.config.username, this.config.password || ''),
@@ -44,14 +50,23 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   async get(sessionId: string): Promise<SessionData<S> | undefined> {
     const session = this.driver.session({ database: this.config.database });
     try {
-      const getMessageQuery =  `MATCH (chatSession:\`${this.sessionLabel}\` {sessionId: $sessionId})
-      WITH chatSession
-      MATCH (chatSession)-[:${this.lastMessageRelType}]->(lastMessage)
-      MATCH p=(lastMessage)<-[:${this.nextMessageRelType}*0..${this.windowSize * 2 - 1}]-()
-      WITH chatSession, p, length(p) AS length
-      ORDER BY length DESC LIMIT 1
-      UNWIND reverse(nodes(p)) AS messageNode
-      RETURN chatSession.state AS state, messageNode`;
+      const getMessageQuery = this.useTckFormat
+        ? `MATCH (chatSession:\`${this.sessionLabel}\` {session_id: $sessionId})
+          WITH chatSession
+          MATCH (chatSession)-[:${this.firstMessageRelType}]->(firstMessage)
+          MATCH p=(firstMessage)-[:${this.nextMessageRelType}*0..${this.windowSize * 2 - 1}]->()
+          WITH chatSession, p, length(p) AS length
+          ORDER BY length DESC LIMIT 1
+          UNWIND nodes(p) AS messageNode
+          RETURN chatSession.state AS state, messageNode`
+        : `MATCH (chatSession:\`${this.sessionLabel}\` {session_id: $sessionId})
+          WITH chatSession
+          MATCH (chatSession)-[:${this.lastMessageRelType}]->(lastMessage)
+          MATCH p=(lastMessage)<-[:${this.nextMessageRelType}*0..${this.windowSize * 2 - 1}]-()
+          WITH chatSession, p, length(p) AS length
+          ORDER BY length DESC LIMIT 1
+          UNWIND reverse(nodes(p)) AS messageNode
+          RETURN chatSession.state AS state, messageNode`;
       const result = await session.run(
         getMessageQuery,
         { sessionId }
@@ -60,14 +75,18 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       if (result.records.length === 0) {
         return undefined;
       }
-      
+
       const record = result.records[0];
       const state = JSON.parse(record.get('state') || '{}');
       const messages: any[] = result.records.map(r => {
         const node = r.get('messageNode');
+        let role = node.properties.role;
+        if (this.useTckFormat && role === 'assistant') {
+          role = 'model';
+        }
         return {
           content: JSON.parse(node.properties.content),
-          role: node.properties.role,
+          role: role,
           metadata: JSON.parse(node.properties.metadata),
           threadId: node.properties.threadId,
         };
@@ -100,7 +119,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
     try {
       const tx = session.beginTransaction();
       const sessionResult = await tx.run(
-        `MERGE (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
+        `MERGE (s:\`${this.sessionLabel}\` {session_id: $sessionId})
          SET s.state = $state
          RETURN s`,
         { sessionId, state: JSON.stringify(sessionData.state) },
@@ -109,25 +128,39 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
 
       let lastNodeId = null;
 
-      const findLastNodeResult = await tx.run(
-        `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
-         OPTIONAL MATCH (s)-[r:\`${this.lastMessageRelType}\`]->(lastNode)
-         RETURN lastNode`,
-         { sessionId }
-      );
-      if (findLastNodeResult.records[0].get('lastNode')) {
+      const findLastNodeResult = this.useTckFormat
+        ? await tx.run(
+          `MATCH (s:\`${this.sessionLabel}\` {session_id: $sessionId})
+             OPTIONAL MATCH (s)-[:${this.firstMessageRelType}]->(firstNode)-[:${this.nextMessageRelType}*0..]->(lastNode)
+             WHERE NOT (lastNode)-[:${this.nextMessageRelType}]->()
+             RETURN lastNode`,
+          { sessionId }
+        )
+        : await tx.run(
+          `MATCH (s:\`${this.sessionLabel}\` {session_id: $sessionId})
+             OPTIONAL MATCH (s)-[r:\`${this.lastMessageRelType}\`]->(lastNode)
+             RETURN lastNode`,
+          { sessionId }
+        );
+
+      if (findLastNodeResult.records[0] && findLastNodeResult.records[0].get('lastNode')) {
         lastNodeId = findLastNodeResult.records[0].get('lastNode').identity;
       }
-      
+
       for (const threadId in sessionData.threads) {
         const messages = sessionData.threads[threadId];
 
         for (const msg of messages) {
           const content = JSON.stringify(msg.content);
           const metadata = JSON.stringify(msg.metadata || {});
+          let roleToSave: string = msg.role;
+          if (this.useTckFormat && msg.role === 'model') {
+            roleToSave = 'assistant';
+          }
 
           const createMessageResult = await tx.run(
             `CREATE (m:\`${this.messageLabel}\` {
+               ${this.useTckFormat ? 'id: randomUUID(),' : ''}
                content: $content,
                role: $role,
                metadata: $metadata,
@@ -135,7 +168,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
                timestamp: timestamp()
              })
              RETURN m`,
-            { content, role: msg.role, metadata, threadId }
+            { content, role: roleToSave, metadata, threadId }
           );
 
           const newMessageNodeId = createMessageResult.records[0].get('m').identity;
@@ -147,14 +180,21 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
                CREATE (n1)-[:${this.nextMessageRelType}]->(n2)`,
               { lastNodeId, newMessageNodeId }
             );
+          } else if (this.useTckFormat) {
+            await tx.run(
+              `MATCH (s:\`${this.sessionLabel}\` {session_id: $sessionId})
+               MATCH (m) WHERE id(m) = $newMessageNodeId
+               CREATE (s)-[:${this.firstMessageRelType}]->(m)`,
+              { sessionId, newMessageNodeId }
+            );
           }
           lastNodeId = newMessageNodeId;
         }
       }
-      
-      if (lastNodeId !== null) {
+
+      if (!this.useTckFormat && lastNodeId !== null) {
         await tx.run(
-          `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
+          `MATCH (s:\`${this.sessionLabel}\` {session_id: $sessionId})
            OPTIONAL MATCH (s)-[r:\`${this.lastMessageRelType}\`]->()
            DELETE r
            WITH s
@@ -163,7 +203,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
           { sessionId, lastNodeId }
         );
       }
-      
+
       await tx.commit();
 
     } finally {
@@ -174,12 +214,14 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   async clear(sessionId: string): Promise<void> {
     const session = this.driver.session({ database: this.config.database });
     try {
-      await session.run(
-        `MATCH p=(chatSession:${this.sessionLabel} {sessionId: $sessionId})-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
-        UNWIND nodes(p) as node
-        DETACH DELETE node`, 
-        { sessionId }
-      );
+      const clearQuery = this.useTckFormat
+        ? `MATCH p=(chatSession:${this.sessionLabel} {session_id: $sessionId})-[:${this.firstMessageRelType}]->(firstMessage)-[:${this.nextMessageRelType}*0..]->()
+           UNWIND nodes(p) as node
+           DETACH DELETE node`
+        : `MATCH p=(chatSession:${this.sessionLabel} {session_id: $sessionId})-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
+           UNWIND nodes(p) as node
+           DETACH DELETE node`;
+      await session.run(clearQuery, { sessionId });
     } finally {
       await session.close();
     }

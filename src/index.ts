@@ -29,9 +29,11 @@ import {
 import { randomUUID } from 'crypto';
 import { SearchStrategy, VectorFunctionStrategy } from "./search-strategy";
 import { ParentChildRetriever, HypotheticalQuestionRetriever, GenericGraphRagRetriever, GraphRagConfig } from "./rag-utils";
+import { getDefaultConfig } from "./config";
+import { configureNeo4jAgentMemoryTools } from "./memory";
 
 export const FULLTEXT_INDEX_SUFFIX = "__fulltext";
-export const errorMetadataAndHybrid =  "Metadata filtering can't be use in combination with a hybrid search approach."
+export const errorMetadataAndHybrid = "Metadata filtering can't be use in combination with a hybrid search approach."
 
 const Neo4jRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
@@ -128,6 +130,8 @@ export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   filterMetadata?: string[];
   ragModel?: any;
   customGraphRagConfigs?: Record<string, GraphRagConfig>;
+  // NUOVO CAMPO:
+  enableAgentMemoryTools?: boolean;
 }
 
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
@@ -136,9 +140,16 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
   return genkitPlugin("neo4j", async (ai: Genkit) => {
     params.map((i) => configureNeo4jRetriever(ai, i));
     params.map((i) => configureNeo4jIndexer(ai, i));
-    
+
     params.map((i) => configureNeo4jGraphRagRetrievers(ai, i));
     params.map((i) => configureNeo4jGraphRagTools(ai, i));
+
+    // NUOVO BLOCCO: Inizializza i Memory Tools se richiesti
+    for (const i of params) {
+      if (i.enableAgentMemoryTools) {
+        await configureNeo4jAgentMemoryTools(ai, i);
+      }
+    }
   });
 }
 
@@ -238,7 +249,7 @@ export function configureNeo4jRetriever<
     neo4jConfig.url,
     neo4j_driver.auth.basic(neo4jConfig.username, neo4jConfig.password),
   );
-  
+
   const strategy = searchStrategy || new VectorFunctionStrategy();
 
   return ai.defineRetriever(
@@ -254,7 +265,7 @@ export function configureNeo4jRetriever<
       });
 
       const retriever_query = strategy.generateQuery(options, params, content?.text ?? '');
-      
+
       const response = await neo4j_instance.executeQuery(
         retriever_query.query,
         {
@@ -265,7 +276,7 @@ export function configureNeo4jRetriever<
         },
         { database: neo4jConfig.database },
       );
-      
+
       const documents = response.records.map((el) => {
         return Document.fromText(
           el.get("text"),
@@ -287,9 +298,9 @@ export function configureNeo4jIndexer<
   ai: Genkit,
   params: Neo4jParams<EmbedderCustomOptions>
 ) {
-  const { 
-    indexId, 
-    embedder, 
+  const {
+    indexId,
+    embedder,
     embedderOptions,
     embeddingProperty = 'embedding',
     idProperty = 'id',
@@ -394,29 +405,6 @@ export function configureNeo4jIndexer<
       neo4j_instance.close();
     },
   );
-}
-
-function getDefaultConfig() {
-  const {
-    NEO4J_URI: url,
-    NEO4J_USERNAME: username,
-    NEO4J_PASSWORD: password,
-    NEO4J_DATABASE: database,
-  } = process.env;
-
-  if (!url || !username || !password) {
-    throw new Error(
-      "Please provide Neo4j connection details through environment variables: NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD are required.\n" +
-      "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
-    );
-  }
-
-  return {
-    url,
-    username,
-    password,
-    ...(database && { database }),
-  };
 }
 
 type SearchType = "vector" | "hybrid";

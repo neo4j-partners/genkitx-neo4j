@@ -1,3 +1,26 @@
+# TODO
+
+- https://gemini.google.com/app/e88135ecadde58e1?hl=it
+- dice di installare `npm install @neo4j-labs/agent-memory`, però sarebbe meglio non installarlo sempre, ma fare come `llm-chunk`, se voglio usare long term lo uso, altrimenti può funzionare anche senza
+
+- we should sync the model with Neo4j agent-memory tck for compatibility
+  riguardo `messageLabel`
+
+
+### nota bene: non ancora disponibile pubblicamente ---
+
+#### Vai nella cartella della libreria TCK
+cd ../agent-memory-tck/clients/typescript
+
+#### Installa le dipendenze interne e compila il codice in JS
+npm install
+npm run build
+
+#### Torna al tuo progetto
+cd ../../../genkitx-neo4j
+
+### ---
+
 # genkitx-neo4j - Neo4j plugin for Genkit
 
 This is a Genkit Plugin for Neo4j.

@@ -1,0 +1,74 @@
+import { Genkit } from "genkit";
+import { Neo4jParams } from ".";
+import { getDefaultConfig } from "./config";
+import { z } from "zod";
+
+export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions extends z.ZodTypeAny>(
+    ai: Genkit,
+    params: Neo4jParams<EmbedderCustomOptions>,
+) {
+    let MemoryClient: any;
+
+    // Import dinamico con fallback
+    try {
+        // @ts-ignore: Ignoriamo l'errore di modulo mancante
+        const agentMemory = await import("@neo4j-labs/agent-memory");
+        MemoryClient = agentMemory.MemoryClient;
+    } catch (err: any) {
+        // STAMPIAMO IL VERO ERRORE PER DEBUG:
+        console.error("ERRORE DI IMPORT DINAMICO:", err);
+
+        throw new Error(
+            `You must install '@neo4j-labs/agent-memory' to use the agent memory tools. \n` +
+            `Dettaglio Errore Interno: ${err.message}`
+        );
+    }
+
+    const { indexId } = params;
+    const neo4jConfig = params.clientParams ?? getDefaultConfig();
+
+    // Inizializza il client di Neo4j Labs
+    const memoryClient = new MemoryClient({
+        endpoint: neo4jConfig.url,
+        username: neo4jConfig.username,
+        password: neo4jConfig.password,
+    });
+
+    ai.defineTool(
+        {
+            name: `neo4j/${indexId}/addMemoryEntity`,
+            description: "Save a fact, person, or important concept into long-term memory.",
+            inputSchema: z.object({
+                name: z.string().describe("Name of the entity (e.g. John Doe, React, Apple)"),
+                entityType: z.string().describe("Type of entity (e.g. PERSON, TECHNOLOGY, ORG)"),
+                description: z.string().optional().describe("Optional description or context of the entity"),
+            }),
+        },
+        async (input) => {
+            await memoryClient.connect();
+            const entity = await memoryClient.longTerm.addEntity(
+                input.name,
+                input.entityType,
+                { description: input.description }
+            );
+            await memoryClient.close();
+            return `Entity ${input.name} saved successfully to memory.`;
+        }
+    );
+
+    ai.defineTool(
+        {
+            name: `neo4j/${indexId}/searchMemoryEntities`,
+            description: "Search for previously saved entities or facts in long-term memory.",
+            inputSchema: z.object({
+                query: z.string().describe("Keyword to search in memory"),
+            }),
+        },
+        async (input) => {
+            await memoryClient.connect();
+            const results = await memoryClient.longTerm.searchEntities(input.query);
+            await memoryClient.close();
+            return results;
+        }
+    );
+}
