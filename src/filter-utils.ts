@@ -8,7 +8,7 @@ const COMPARISONS_TO_NATIVE: Record<string, string> = {
 };
 
 const COMPARISONS_TO_NATIVE_OPERATORS = new Set(
-  Object.keys(COMPARISONS_TO_NATIVE)
+  Object.keys(COMPARISONS_TO_NATIVE),
 );
 
 const TEXT_OPERATORS = new Set(["$like", "$ilike"]);
@@ -28,7 +28,7 @@ const IS_IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 function combineQueries(
   inputQueries: [string, Record<string, any>][],
-  operator: string
+  operator: string,
 ): [string, Record<string, any>] {
   let combinedQuery = "";
   const combinedParams: Record<string, any> = {};
@@ -58,7 +58,7 @@ function combineQueries(
 }
 
 function collectParams(
-  inputData: [string, Record<string, string>][]
+  inputData: [string, Record<string, string>][],
 ): [string[], Record<string, any>] {
   const queryParts: string[] = [];
   const params: Record<string, any> = {};
@@ -74,24 +74,24 @@ function collectParams(
 function handleFieldFilter(
   field: string,
   value: any,
-  paramNumber = 1
+  paramNumber = 1,
 ): [string, Record<string, any>] {
   if (typeof field !== "string") {
     throw new Error(
-      `field should be a string but got: ${typeof field} with value: ${field}`
+      `field should be a string but got: ${typeof field} with value: ${field}`,
     );
   }
 
   if (field.startsWith("$")) {
     throw new Error(
-      `Invalid filter condition. Expected a field but got an operator: ${field}`
+      `Invalid filter condition. Expected a field but got an operator: ${field}`,
     );
   }
 
   // Allow [a - zA - Z0 -9_], disallow $ for now until we support escape characters
   if (!IS_IDENTIFIER_REGEX.test(field)) {
     throw new Error(
-      `Invalid field name: ${field}. Expected a valid identifier.`
+      `Invalid field name: ${field}. Expected a valid identifier.`,
     );
   }
 
@@ -105,8 +105,8 @@ function handleFieldFilter(
       throw new Error(`Invalid filter condition. Expected a value which is a dictionary
         with a single key that corresponds to an operator but got a dictionary
         with ${keys.length} keys. The first few keys are: ${keys
-        .slice(0, 3)
-        .join(", ")}
+          .slice(0, 3)
+          .join(", ")}
       `);
     }
 
@@ -116,7 +116,7 @@ function handleFieldFilter(
 
     if (!SUPPORTED_OPERATORS.has(operator)) {
       throw new Error(
-        `Invalid operator: ${operator}. Expected one of ${SUPPORTED_OPERATORS}`
+        `Invalid operator: ${operator}. Expected one of ${SUPPORTED_OPERATORS}`,
       );
     }
   } else {
@@ -177,7 +177,7 @@ function handleFieldFilter(
 }
 
 export function constructMetadataFilter(
-  filter: Record<string, any>
+  filter: Record<string, any>,
 ): [string, Record<string, any>] {
   if (typeof filter !== "object" || filter === null) {
     throw new Error("Expected a dictionary representing the filter condition.");
@@ -191,20 +191,20 @@ export function constructMetadataFilter(
     if (key.startsWith("$")) {
       if (!["$and", "$or"].includes(key.toLowerCase())) {
         throw new Error(
-          `Invalid filter condition. Expected $and or $or but got: ${key}`
+          `Invalid filter condition. Expected $and or $or but got: ${key}`,
         );
       }
 
       if (!Array.isArray(value)) {
         throw new Error(
-          `Expected an array for logical conditions, but got ${typeof value} for value: ${value}`
+          `Expected an array for logical conditions, but got ${typeof value} for value: ${value}`,
         );
       }
 
       const operation = key.toLowerCase() === "$and" ? "AND" : "OR";
       const combinedQueries = combineQueries(
         value.map((v) => constructMetadataFilter(v)),
-        operation
+        operation,
       );
 
       return combinedQueries;
@@ -215,26 +215,25 @@ export function constructMetadataFilter(
     for (const [key] of entries) {
       if (key.startsWith("$")) {
         throw new Error(
-          `Invalid filter condition. Expected a field but got an operator: ${key}`
+          `Invalid filter condition. Expected a field but got an operator: ${key}`,
         );
       }
     }
 
     const and_multiple = collectParams(
       entries.map(([field, val], index) =>
-        handleFieldFilter(field, val, index + 1)
-      )
+        handleFieldFilter(field, val, index + 1),
+      ),
     );
 
     if (and_multiple.length >= 1) {
       return [and_multiple[0].join(" AND "), and_multiple[1]];
     } else {
       throw Error(
-        "Invalid filter condition. Expected a dictionary but got an empty dictionary"
+        "Invalid filter condition. Expected a dictionary but got an empty dictionary",
       );
     }
   } else {
     throw new Error("Filter condition contains no entries.");
   }
 }
-
