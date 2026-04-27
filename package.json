@@ -41,7 +41,7 @@
     "zod": "^3.22.4"
   },
   "peerDependencies": {
-    "@neo4j-labs/agent-memory": "^0.1.0",
+    "@neo4j-labs/agent-memory": "file:../agent-memory-tck/clients/typescript",
     "genkit": "^1.0.0"
   },
   "peerDependenciesMeta": {

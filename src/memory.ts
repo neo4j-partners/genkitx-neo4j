@@ -27,9 +27,14 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
     const { indexId } = params;
     const neo4jConfig = params.clientParams ?? getDefaultConfig();
 
-    // Inizializza il client di Neo4j Labs
+    let memoryEndpoint = neo4jConfig.url || "http://localhost:8000";
+    if (memoryEndpoint.startsWith("bolt://") || memoryEndpoint.startsWith("neo4j://")) {
+        memoryEndpoint = "http://localhost:8000";
+    }
+
+
     const memoryClient = new MemoryClient({
-        endpoint: neo4jConfig.url,
+        endpoint: memoryEndpoint,
         username: neo4jConfig.username,
         password: neo4jConfig.password,
     });
