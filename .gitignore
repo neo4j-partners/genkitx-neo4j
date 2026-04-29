@@ -7,3 +7,4 @@ lib
 .vscode
 .env
 .DS_Store
+neo4j-env
