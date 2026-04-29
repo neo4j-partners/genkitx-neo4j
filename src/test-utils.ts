@@ -6,6 +6,7 @@ import { genkit } from 'genkit';
 import { gemini15Flash, googleAI } from '@genkit-ai/googleai';
 import { neo4j } from '.';
 import { mockEmbedder } from './dummyEmbedder';
+import { geminiModel } from './utils';
 
 export interface Neo4jTestStartupContext {
   neo4jContainer: StartedNeo4jContainer;
@@ -15,13 +16,11 @@ export interface Neo4jTestStartupContext {
   clientParams: any;
 }
 
-export const geminiModel = 'googleai/gemini-2.5-flash'
-
 export function setupNeo4jTestEnvironment(
   neo4jVersion: string = '2026.01.4',
   indexId: string = 'genkit-test-index',
-  beforeAllCallback: (ctx: Neo4jTestStartupContext) => any = () => {},
-  beforeEachCallback: (ctx: Neo4jTestStartupContext) => any = () => {},
+  beforeAllCallback: (ctx: Neo4jTestStartupContext) => any = () => { },
+  beforeEachCallback: (ctx: Neo4jTestStartupContext) => any = () => { },
 ): Neo4jTestStartupContext {
   // We an empty object that will be populated by the hooks.
   const setupCtx = {} as Neo4jTestStartupContext;

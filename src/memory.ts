@@ -60,6 +60,28 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
             return `Entity ${input.name} saved successfully to memory.`;
         }
     );
+    ai.defineTool(
+        {
+            name: `neo4j/${indexId}/addMemoryRelationship`,
+            description: "Crea una relazione semantica tra due entità esistenti nel Knowledge Graph.",
+            inputSchema: z.object({
+                sourceId: z.string().describe("L'ID o il nome dell'entità di partenza (es. 'Lino Banfi')"),
+                targetId: z.string().describe("L'ID o il nome dell'entità di arrivo (es. 'Oronzo Canà')"),
+                type: z.string().describe("Il tipo di relazione (es. 'ACTED_IN', 'PLAYS_ROLE'). Usa lo snake_case o l'uppercase."),
+                description: z.string().optional().describe("Una descrizione testuale opzionale della relazione"),
+            }),
+        },
+        async (input) => {
+            // Qui richiamiamo il client TypeScript di neo4j-agent-memory!
+            // Assicurati che il metodo si chiami addRelationship nel client npm
+            const result = await memoryClient.longTerm.addRelationship({
+                source: input.sourceId,
+                target: input.targetId,
+                type: input.type,
+                description: input.description
+            });
+            return `Relazione ${input.type} creata con successo tra ${input.sourceId} e ${input.targetId}.`;
+        });
 
     ai.defineTool(
         {

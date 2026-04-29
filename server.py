@@ -53,3 +53,23 @@ async def search_entities(request: Request):
     data = await request.json()
     results = await memory_client.long_term.search_entities(data["query"])
     return [{"name": r.name, "description": r.description} for r in results]
+
+
+@app.post("/add_relationship")
+async def add_relationship(request: Request):
+    data = await request.json()
+    
+    source = data.get("source") or data.get("sourceId")
+    target = data.get("target") or data.get("targetId")
+    rel_type = data.get("type") or data.get("relationshipType")
+    description = data.get("description")
+    
+    # Usiamo argomenti POSIZIONALI per evitare l'errore "unexpected keyword argument"
+    # L'ordine standard è: source_id, target_id, type, description
+    await memory_client.long_term.add_relationship(
+        source,
+        target,
+        rel_type,
+        description
+    )
+    return {"success": True}

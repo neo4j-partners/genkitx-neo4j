@@ -2,7 +2,6 @@ import { genkit } from 'genkit';
 import { neo4j } from './src'; // Your local plugin
 import googleAI from '@genkit-ai/googleai';
 
-export const geminiModel = 'googleai/gemini-2.5-flash'
 
 const indexId = 'lino-memory-index';
 
