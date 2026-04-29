@@ -9,18 +9,18 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
 ) {
     let MemoryClient: any;
 
-    // Import dinamico con fallback
+    // Dynamic import with fallback
     try {
-        // @ts-ignore: Ignoriamo l'errore di modulo mancante
+        // @ts-ignore: Ignore missing module error
         const agentMemory = await import("@neo4j-labs/agent-memory");
         MemoryClient = agentMemory.MemoryClient;
     } catch (err: any) {
-        // STAMPIAMO IL VERO ERRORE PER DEBUG:
-        console.error("ERRORE DI IMPORT DINAMICO:", err);
+        // PRINT THE REAL ERROR FOR DEBUGGING:
+        console.error("DYNAMIC IMPORT ERROR:", err);
 
         throw new Error(
             `You must install '@neo4j-labs/agent-memory' to use the agent memory tools. \n` +
-            `Dettaglio Errore Interno: ${err.message}`
+            `Internal Error Detail: ${err.message}`
         );
     }
 
@@ -63,24 +63,24 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
     ai.defineTool(
         {
             name: `neo4j/${indexId}/addMemoryRelationship`,
-            description: "Crea una relazione semantica tra due entità esistenti nel Knowledge Graph.",
+            description: "Create a semantic relationship between two existing entities in the Knowledge Graph.",
             inputSchema: z.object({
-                sourceId: z.string().describe("L'ID o il nome dell'entità di partenza (es. 'Lino Banfi')"),
-                targetId: z.string().describe("L'ID o il nome dell'entità di arrivo (es. 'Oronzo Canà')"),
-                type: z.string().describe("Il tipo di relazione (es. 'ACTED_IN', 'PLAYS_ROLE'). Usa lo snake_case o l'uppercase."),
-                description: z.string().optional().describe("Una descrizione testuale opzionale della relazione"),
+                sourceId: z.string().describe("The ID or name of the source entity (e.g., 'Lino Banfi')"),
+                targetId: z.string().describe("The ID or name of the target entity (e.g., 'Oronzo Canà')"),
+                type: z.string().describe("The type of relationship (e.g., 'ACTED_IN', 'PLAYS_ROLE'). Use snake_case or uppercase."),
+                description: z.string().optional().describe("An optional text description of the relationship"),
             }),
         },
         async (input) => {
-            // Qui richiamiamo il client TypeScript di neo4j-agent-memory!
-            // Assicurati che il metodo si chiami addRelationship nel client npm
+            // Here we call the neo4j-agent-memory TypeScript client!
+            // Make sure the method is named addRelationship in the npm client
             const result = await memoryClient.longTerm.addRelationship({
                 source: input.sourceId,
                 target: input.targetId,
                 type: input.type,
                 description: input.description
             });
-            return `Relazione ${input.type} creata con successo tra ${input.sourceId} e ${input.targetId}.`;
+            return `Relationship ${input.type} successfully created between ${input.sourceId} and ${input.targetId}.`;
         });
 
     ai.defineTool(

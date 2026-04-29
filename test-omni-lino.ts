@@ -6,10 +6,10 @@ import { geminiModel } from './src/utils';
 
 const indexId = 'lino-omni-index';
 
-// Configurazione centralizzata del DB
+// Centralized DB configuration
 const DB_URL = 'bolt://localhost:7687';
 const DB_USER = 'neo4j';
-const DB_PASS = 'password'; // Assicurati che sia quella corretta per il tuo DB locale
+const DB_PASS = 'password'; // Make sure it's the correct one for your local DB
 
 // 1. Initialize Genkit Session Store (Short-term memory TCK Bronze)
 const sessionStore = new Neo4jSessionStore({
@@ -47,7 +47,7 @@ async function runOmniLino() {
     const sessionId = "lino-session-" + Date.now();
     console.log(`\n💬 Starting session: ${sessionId}`);
 
-    // System prompt potenziato per forzare l'uso delle relazioni
+    // Enhanced system prompt to force the use of relationships
     const systemPrompt = `
     You are an expert archivist of Italian cinema. 
     Use the tools at your disposal to build a precise Knowledge Graph:
@@ -74,12 +74,12 @@ async function runOmniLino() {
             { role: 'user', content: [{ text: prompt1 }] }
         ],
         tools: availableTools,
-        config: { temperature: 0.1 }, // Bassa temperatura per favorire l'uso preciso dei tool
+        config: { temperature: 0.1 }, // Low temperature to favor precise tool usage
     });
 
     console.log("🤖 Gemini Action Log (Graph Building):", response1.text);
 
-    // Salvataggio della prima interazione nello store
+    // Saving the first interaction in the store
     await sessionStore.save(sessionId, {
         id: sessionId,
         state: {},
@@ -98,7 +98,7 @@ async function runOmniLino() {
     console.log("\n👤 User: Relational Question...");
     const prompt2 = "Who is Pasquale Baudaffi, and who plays him? Mention any other movies that actor has been in. Use your search tools.";
 
-    // Recuperiamo lo storico (la "catena" di Short-term memory)
+    // Retrieve the history (the short-term memory chain)
     const previousSession = await sessionStore.get(sessionId);
     const history = previousSession?.threads?.main || [];
 
@@ -115,7 +115,7 @@ async function runOmniLino() {
 
     console.log("🤖 Gemini Answer (Semantic Retrieval):", response2.text);
 
-    // Aggiornamento dello store con la seconda interazione
+    // Updating the store with the second interaction
     await sessionStore.save(sessionId, {
         id: sessionId,
         state: {},
