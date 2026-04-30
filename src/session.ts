@@ -1,5 +1,5 @@
-import { SessionData, SessionStore } from '@genkit-ai/ai/session';
-import { Driver, auth, driver as neo4jDriver } from 'neo4j-driver';
+import { SessionData, SessionStore } from "@genkit-ai/ai/session";
+import { Driver, auth, driver as neo4jDriver } from "neo4j-driver";
 
 export interface Neo4jSessionStoreConfig {
   url: string;
@@ -25,13 +25,13 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
 
   constructor(config: Neo4jSessionStoreConfig) {
     this.config = config;
-    this.sessionLabel = config.sessionLabel || 'GenkitSession';
-    this.messageLabel = config.messageLabel || 'Message';
-    this.nextMessageRelType = config.nextMessageRelType || 'NEXT';
-    this.lastMessageRelType = config.lastMessageRelType || 'LAST_MESSAGE';
+    this.sessionLabel = config.sessionLabel || "GenkitSession";
+    this.messageLabel = config.messageLabel || "Message";
+    this.nextMessageRelType = config.nextMessageRelType || "NEXT";
+    this.lastMessageRelType = config.lastMessageRelType || "LAST_MESSAGE";
     this.driver = neo4jDriver(
       this.config.url,
-      auth.basic(this.config.username, this.config.password || ''),
+      auth.basic(this.config.username, this.config.password || ""),
       {},
     );
     this.windowSize = Neo4jSessionStore.DEFAULT_SIZE;
@@ -44,7 +44,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   async get(sessionId: string): Promise<SessionData<S> | undefined> {
     const session = this.driver.session({ database: this.config.database });
     try {
-      const getMessageQuery =  `MATCH (chatSession:\`${this.sessionLabel}\` {sessionId: $sessionId})
+      const getMessageQuery = `MATCH (chatSession:\`${this.sessionLabel}\` {sessionId: $sessionId})
       WITH chatSession
       MATCH (chatSession)-[:${this.lastMessageRelType}]->(lastMessage)
       MATCH p=(lastMessage)<-[:${this.nextMessageRelType}*0..${this.windowSize * 2 - 1}]-()
@@ -52,19 +52,16 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       ORDER BY length DESC LIMIT 1
       UNWIND reverse(nodes(p)) AS messageNode
       RETURN chatSession.state AS state, messageNode`;
-      const result = await session.run(
-        getMessageQuery,
-        { sessionId }
-      );
+      const result = await session.run(getMessageQuery, { sessionId });
 
       if (result.records.length === 0) {
         return undefined;
       }
-      
+
       const record = result.records[0];
-      const state = JSON.parse(record.get('state') || '{}');
-      const messages: any[] = result.records.map(r => {
-        const node = r.get('messageNode');
+      const state = JSON.parse(record.get("state") || "{}");
+      const messages: any[] = result.records.map((r) => {
+        const node = r.get("messageNode");
         return {
           content: JSON.parse(node.properties.content),
           role: node.properties.role,
@@ -74,7 +71,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       });
 
       const threads: Record<string, any[]> = {};
-      messages.forEach(msg => {
+      messages.forEach((msg) => {
         if (!threads[msg.threadId]) {
           threads[msg.threadId] = [];
         }
@@ -105,7 +102,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
          RETURN s`,
         { sessionId, state: JSON.stringify(sessionData.state) },
       );
-      const sessionNodeId = sessionResult.records[0].get('s').identity;
+      const sessionNodeId = sessionResult.records[0].get("s").identity;
 
       let lastNodeId = null;
 
@@ -113,12 +110,12 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
         `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
          OPTIONAL MATCH (s)-[r:\`${this.lastMessageRelType}\`]->(lastNode)
          RETURN lastNode`,
-         { sessionId }
+        { sessionId },
       );
-      if (findLastNodeResult.records[0].get('lastNode')) {
-        lastNodeId = findLastNodeResult.records[0].get('lastNode').identity;
+      if (findLastNodeResult.records[0].get("lastNode")) {
+        lastNodeId = findLastNodeResult.records[0].get("lastNode").identity;
       }
-      
+
       for (const threadId in sessionData.threads) {
         const messages = sessionData.threads[threadId];
 
@@ -135,23 +132,24 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
                timestamp: timestamp()
              })
              RETURN m`,
-            { content, role: msg.role, metadata, threadId }
+            { content, role: msg.role, metadata, threadId },
           );
 
-          const newMessageNodeId = createMessageResult.records[0].get('m').identity;
+          const newMessageNodeId =
+            createMessageResult.records[0].get("m").identity;
 
           if (lastNodeId !== null) {
             await tx.run(
               `MATCH (n1), (n2)
                WHERE id(n1) = $lastNodeId AND id(n2) = $newMessageNodeId
                CREATE (n1)-[:${this.nextMessageRelType}]->(n2)`,
-              { lastNodeId, newMessageNodeId }
+              { lastNodeId, newMessageNodeId },
             );
           }
           lastNodeId = newMessageNodeId;
         }
       }
-      
+
       if (lastNodeId !== null) {
         await tx.run(
           `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
@@ -160,12 +158,11 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
            WITH s
            MATCH (lastNode) WHERE id(lastNode) = $lastNodeId
            CREATE (s)-[:${this.lastMessageRelType}]->(lastNode)`,
-          { sessionId, lastNodeId }
+          { sessionId, lastNodeId },
         );
       }
-      
-      await tx.commit();
 
+      await tx.commit();
     } finally {
       await session.close();
     }
@@ -177,8 +174,8 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       await session.run(
         `MATCH p=(chatSession:${this.sessionLabel} {sessionId: $sessionId})-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
         UNWIND nodes(p) as node
-        DETACH DELETE node`, 
-        { sessionId }
+        DETACH DELETE node`,
+        { sessionId },
       );
     } finally {
       await session.close();

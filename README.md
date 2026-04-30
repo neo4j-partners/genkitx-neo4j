@@ -21,18 +21,14 @@ NEO4J_PASSWORD=password
 ## Using the plugin
 
 ```ts
-import { genkit } from 'genkit';
-import {
-  neo4j,
-  neo4jRetrieverRef,
-  neo4jIndexerRef,
-} from 'genkitx-neo4j';
+import { genkit } from "genkit";
+import { neo4j, neo4jRetrieverRef, neo4jIndexerRef } from "genkitx-neo4j";
 
 const ai = genkit({
   plugins: [
     neo4j([
       {
-        indexId: 'bob-facts',
+        indexId: "bob-facts",
         embedder: textEmbedding004,
       },
     ]),
@@ -40,13 +36,13 @@ const ai = genkit({
 });
 
 export const bobFactsIndexer = neo4jIndexerRef({
-  indexId: 'bob-facts',
+  indexId: "bob-facts",
 });
 await ai.index({ indexer: bobFactsIndexer, documents });
 
 // To specify an index:
 export const bobFactsRetriever = neo4jRetrieverRef({
-  indexId: 'bob-facts',
+  indexId: "bob-facts",
 });
 
 // To use the index you configured when you loaded the plugin:

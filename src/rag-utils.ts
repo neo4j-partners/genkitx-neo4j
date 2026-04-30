@@ -21,13 +21,16 @@ export class GenericGraphRagRetriever {
     protected neo4jConfig: Neo4jGraphConfig,
     protected indexerRef: any,
     protected vectorRetrieverRef: any,
-    protected config: GraphRagConfig
+    protected config: GraphRagConfig,
   ) {}
 
   public getNeo4jInstance() {
     return neo4j_driver.driver(
       this.neo4jConfig.url,
-      neo4j_driver.auth.basic(this.neo4jConfig.username, this.neo4jConfig.password)
+      neo4j_driver.auth.basic(
+        this.neo4jConfig.username,
+        this.neo4jConfig.password,
+      ),
     );
   }
 
@@ -49,15 +52,15 @@ export class GenericGraphRagRetriever {
     const vectorResults = await this.ai.retrieve({
       retriever: this.vectorRetrieverRef,
       query: searchQuery,
-      options: { k: k * 2 }
+      options: { k: k * 2 },
     });
 
     const ids = [
       ...new Set(
         vectorResults
-          .map(doc => doc.metadata?.[this.config.idMetadataKey])
-          .filter(Boolean)
-      )
+          .map((doc) => doc.metadata?.[this.config.idMetadataKey])
+          .filter(Boolean),
+      ),
     ];
 
     if (ids.length === 0) {
@@ -65,28 +68,26 @@ export class GenericGraphRagRetriever {
     }
 
     const session = this.getNeo4jInstance().session();
-    
+
     const cypherParams = {
-      [this.config.cypherIdParamName]: ids
+      [this.config.cypherIdParamName]: ids,
     };
-    
-    const result = await session.run(
-      this.config.cypherQuery, 
-      cypherParams
-    );
-    
+
+    const result = await session.run(this.config.cypherQuery, cypherParams);
+
     await session.close();
 
-    return result.records.map(record => 
-      new Document({
-        content: [{ text: record.get(this.config.cypherReturnTextField) }],
-        metadata: { 
-          source: this.constructor.name, 
-          graphId: this.config.cypherReturnIdField 
-            ? record.get(this.config.cypherReturnIdField) 
-            : undefined 
-        }
-      })
+    return result.records.map(
+      (record) =>
+        new Document({
+          content: [{ text: record.get(this.config.cypherReturnTextField) }],
+          metadata: {
+            source: this.constructor.name,
+            graphId: this.config.cypherReturnIdField
+              ? record.get(this.config.cypherReturnIdField)
+              : undefined,
+          },
+        }),
     );
   }
 }
@@ -96,10 +97,11 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
     ai: ReturnType<typeof genkit>,
     neo4jConfig: Neo4jGraphConfig,
     indexerRef: any,
-    vectorRetrieverRef: any
+    vectorRetrieverRef: any,
   ) {
     super(ai, neo4jConfig, indexerRef, vectorRetrieverRef, {
-      systemPrompt: "You are an expert assistant. Use the provided parent-child context to answer the user's question. If the answer is not in the context, state it clearly.",
+      systemPrompt:
+        "You are an expert assistant. Use the provided parent-child context to answer the user's question. If the answer is not in the context, state it clearly.",
       idMetadataKey: "chunkId",
       cypherIdParamName: "chunkIds",
       cypherQuery: `
@@ -108,7 +110,7 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
         RETURN c.text AS parentText, c.id AS chunkId
       `,
       cypherReturnTextField: "parentText",
-      cypherReturnIdField: "chunkId"
+      cypherReturnIdField: "chunkId",
     });
   }
 
@@ -130,7 +132,7 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
       minLength: 1000,
       maxLength: 2000,
       splitter: "sentence",
-      overlap: 100
+      overlap: 100,
     } as any;
 
     for (const doc of documents) {
@@ -143,19 +145,20 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
           ...chunkingConfig,
           minLength: 300,
           maxLength: 500,
-          overlap: 50
+          overlap: 50,
         });
 
         const documentsToIndex = subChunks.map(
-          (sub) => new Document({ 
-            content: [{ text: sub }], 
-            metadata: { ...doc.metadata, docId, chunkId }
-          })
+          (sub) =>
+            new Document({
+              content: [{ text: sub }],
+              metadata: { ...doc.metadata, docId, chunkId },
+            }),
         );
-        
+
         await this.ai.index({
           indexer: this.indexerRef,
-          documents: documentsToIndex
+          documents: documentsToIndex,
         });
 
         await session.run(
@@ -164,7 +167,7 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
            MERGE (c:Chunk {id: $chunkId})
            SET c.text = $chunkText
            MERGE (d)-[:HAS_CHUNK]->(c)`,
-          { docId, metadata: doc.metadata ?? {}, chunkId, chunkText }
+          { docId, metadata: doc.metadata ?? {}, chunkId, chunkText },
         );
 
         for (const sub of subChunks) {
@@ -174,7 +177,7 @@ export class ParentChildRetriever extends GenericGraphRagRetriever {
              SET s.text = $text
              MERGE (c:Chunk {id: $chunkId})
              MERGE (c)-[:HAS_SUBCHUNK]->(s)`,
-            { subId, text: sub, chunkId }
+            { subId, text: sub, chunkId },
           );
         }
       }
@@ -191,10 +194,11 @@ export class HypotheticalQuestionRetriever extends GenericGraphRagRetriever {
     neo4jConfig: Neo4jGraphConfig,
     indexerRef: any,
     vectorRetrieverRef: any,
-    model?: any
+    model?: any,
   ) {
     super(ai, neo4jConfig, indexerRef, vectorRetrieverRef, {
-      systemPrompt: "Answer the question using ONLY the retrieved documents. Be concise and direct.",
+      systemPrompt:
+        "Answer the question using ONLY the retrieved documents. Be concise and direct.",
       idMetadataKey: "docId",
       cypherIdParamName: "docIds",
       cypherQuery: `
@@ -206,7 +210,8 @@ export class HypotheticalQuestionRetriever extends GenericGraphRagRetriever {
       cypherReturnIdField: "docId",
       useHyDE: true,
       model: model,
-      hydePrompt: "Write a brief hypothetical paragraph perfectly answering this question. It does not need to be factual, just capture relevant vocabulary:"
+      hydePrompt:
+        "Write a brief hypothetical paragraph perfectly answering this question. It does not need to be factual, just capture relevant vocabulary:",
     });
   }
 
@@ -219,24 +224,24 @@ export class HypotheticalQuestionRetriever extends GenericGraphRagRetriever {
 
     for (const doc of documents) {
       const docId = doc.id ?? uuidv4();
-      
-      await this.ai.index({ 
-        indexer: this.indexerRef, 
+
+      await this.ai.index({
+        indexer: this.indexerRef,
         documents: [
           new Document({
             content: [{ text: doc.text }],
-            metadata: { docId, ...doc.metadata }
-          })
-        ] 
+            metadata: { docId, ...doc.metadata },
+          }),
+        ],
       });
 
       await session.run(
         `MERGE (d:Document {id: $docId})
          SET d.text = $text, d += $metadata`,
-        { docId, text: doc.text, metadata: doc.metadata ?? {} }
+        { docId, text: doc.text, metadata: doc.metadata ?? {} },
       );
     }
-    
+
     await session.close();
     return { status: "ok" };
   }
