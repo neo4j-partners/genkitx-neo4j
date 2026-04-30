@@ -1,42 +1,42 @@
-// NOTA: Non c'è nessun import di 'genkit' o del tuo plugin qui.
-// Importiamo solo il client ufficiale di Neo4j Labs.
+// NOTE: There is no import of 'genkit' or your plugin here.
+// We are only importing the official Neo4j Labs client.
 
-// @ts-ignore: Ignoriamo l'errore TS per questo test diretto
+// @ts-ignore: Ignoring TS error for this direct test
 // import { MemoryClient } from '@neo4j-labs/src/client.ts';
-import { MemoryClient } from '../agent-memory-tck/clients/typescript/src/index.ts';
+import { MemoryClient } from '../clients/typescript/src/index.ts';
 // import { MemoryClient } from "@neo4j-labs/agent-memory";
 
 async function runStandaloneTest() {
-    console.log("1. Inizializzo il MemoryClient verso il server Python...");
-    // Puntiamo al server Python che hai avviato con uvx
+    console.log("1. Initializing MemoryClient towards the Python server...");
+    // We are pointing to the Python server started with uvx
     const memoryClient = new MemoryClient({
-        endpoint: "http://localhost:8000",
+        endpoint: "http://localhost:3001",
     });
 
     try {
         await memoryClient.connect();
-        console.log("✅ Connesso al server Python con successo!");
+        console.log("✅ Successfully connected to the server!");
 
-        console.log("2. Aggiungo un'entità nella Long-Term Memory...");
+        console.log("2. Adding an entity to Long-Term Memory...");
         const entity = await memoryClient.longTerm.addEntity(
-            "TestSoloAgentMemory",
+            "StandaloneTestEntity",
             "CONCEPT",
-            { description: "Creato usando solo il client TypeScript ufficiale" }
+            { description: "Created using only the official TypeScript client" }
         );
-        console.log(`✅ Entità creata! ID assegnato: ${entity.id}`);
+        console.log(`✅ Entity created! Assigned ID: ${entity.id}`);
 
-        console.log("3. Eseguo una ricerca per verificare che sia sul database...");
-        const results = await memoryClient.longTerm.searchEntities("TestSoloAgentMemory");
+        console.log("3. Executing a search to verify it's in the database...");
+        const results = await memoryClient.longTerm.searchEntities("StandaloneTestEntity");
 
-        console.log("✅ Risultati trovati:");
+        console.log("✅ Results found:");
         results.forEach(res => {
-            console.log(` - Nome: ${res.name} | Descrizione: ${res.description}`);
+            console.log(` - Name: ${res.name} | Description: ${res.description}`);
         });
 
     } catch (error) {
-        console.error("❌ Errore durante il test:", error);
+        console.error("❌ Error during test:", error);
     } finally {
-        console.log("4. Chiudo la connessione.");
+        console.log("4. Closing the connection.");
         await memoryClient.close();
     }
 }

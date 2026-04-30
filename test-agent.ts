@@ -23,7 +23,7 @@ const ai = genkit({
     model: geminiModel,
 });
 
-async function runLinoBanfiAgent() {
+async function runAgent() {
     console.log("🚀 Starting Genkit Cognitive Agent with Neo4j Memory...");
 
     // 1. Retrieve the tools registered by your plugin
@@ -84,4 +84,4 @@ async function runLinoBanfiAgent() {
     }
 }
 
-runLinoBanfiAgent().catch(console.error);
+runAgent().catch(console.error);

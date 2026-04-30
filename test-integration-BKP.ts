@@ -1,56 +1,56 @@
 import { genkit } from 'genkit';
-import { neo4j } from './src'; // Importa il TUO plugin locale!
+import { neo4j } from './src'; // Import YOUR local plugin!
 
 async function runIntegrationTest() {
-    const indexId = 'test-memoria';
+    const indexId = 'memory-test';
 
-    console.log("1. Inizializzo Genkit con il TUO plugin neo4j...");
+    console.log("1. Initializing Genkit with YOUR neo4j plugin...");
 
     const ai = genkit({
         plugins: [
             neo4j([
                 {
                     indexId: indexId,
-                    // 1. Diamo al Driver Ufficiale l'URL del Database Neo4j VERO
+                    // 1. Provide the Official Driver with the URL of the REAL Neo4j Database
                     clientParams: {
                         url: 'bolt://localhost:7687',
                         username: 'neo4j',
-                        password: 'password' // Usa la tua password Docker
+                        password: 'password' // Use your Docker password
                     },
-                    // 2. Abilitiamo i tool di memoria (che punteranno internamente a http://localhost:8000)
+                    // 2. Enable memory tools (which will point internally to http://localhost:3001)
                     enableAgentMemoryTools: true,
-                    // NOTA: il tuo plugin deve essere modificato per non far schiantare l'HTTP client se riceve "bolt://"
+                    // NOTE: your plugin must be modified so as not to crash the HTTP client if it receives "bolt://"
                 },
             ]),
         ],
     });
 
-    console.log("2. Recupero i Tool dal registro interno di Genkit...");
+    console.log("2. Retrieving Tools from the Genkit internal registry...");
     const addAction = await ai.registry.lookupAction(`/tool/neo4j/${indexId}/addMemoryEntity`);
     const searchAction = await ai.registry.lookupAction(`/tool/neo4j/${indexId}/searchMemoryEntities`);
 
     if (!addAction || !searchAction) {
-        throw new Error("❌ I Tool non sono stati registrati! Controlla il tuo plugin.");
+        throw new Error("❌ Tools were not registered! Check your plugin.");
     }
-    console.log("✅ Tool registrati con successo in Genkit!");
+    console.log("✅ Tools registered successfully in Genkit!");
 
-    console.log("3. Eseguo il Tool 'addMemoryEntity'...");
+    console.log("3. Executing 'addMemoryEntity' tool...");
     const addResult = await addAction({
-        name: "TestGenkitVettore",
+        name: "TestGenkitVector",
         entityType: "PLUGIN",
-        description: "Creato con Genkit e con embedding locale"
+        description: "Created with Genkit and local embedding"
     });
-    console.log("✅ Risultato del Tool (Add):", addResult);
+    console.log("✅ Tool Result (Add):", addResult);
 
-    // AGGIUNGI QUESTA PAUSA
-    console.log("⏳ Attendo 2 secondi per permettere a Neo4j di indicizzare il vettore...");
+    // ADD THIS PAUSE
+    console.log("⏳ Waiting 2 seconds for Neo4j to index the vector...");
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    console.log("4. Eseguo il Tool 'searchMemoryEntities'...");
+    console.log("4. Executing 'searchMemoryEntities' tool...");
     const searchResult = await searchAction({
-        query: "TestGenkitVettore" // <-- Cerca il nuovo nome
+        query: "TestGenkitVector" // <-- Search for the new name
     });
-    console.log("✅ Risultato del Tool (Search):", searchResult);
+    console.log("✅ Tool Result (Search):", searchResult);
 }
 
 runIntegrationTest();

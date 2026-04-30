@@ -6,8 +6,8 @@ const ai = genkit({
     plugins: [
         googleAI(),
         neo4j([{
-            indexId: 'memoria-agente',
-            embedder: 'mock-embedder' as any, // Il server Python gestisce gli embedding
+            indexId: 'agent-memory',
+            embedder: 'mock-embedder' as any, // The Python server handles embeddings
             clientParams: { url: 'bolt://localhost:7687', username: 'neo4j', password: 'password' },
             enableAgentMemoryTools: true,
         }]),
@@ -16,24 +16,24 @@ const ai = genkit({
 });
 
 async function runAgent() {
-    // Recuperiamo i tool dal plugin neo4j
-    const addTool = await ai.registry.lookupAction('/tool/neo4j/memoria-agente/addMemoryEntity');
-    const searchTool = await ai.registry.lookupAction('/tool/neo4j/memoria-agente/searchMemoryEntities');
+    // Retrieve tools from the neo4j plugin
+    const addTool = await ai.registry.lookupAction('/tool/neo4j/agent-memory/addMemoryEntity');
+    const searchTool = await ai.registry.lookupAction('/tool/neo4j/agent-memory/searchMemoryEntities');
 
-    console.log("--- Conversazione 1: L'utente si presenta ---");
+    console.log("--- Conversation 1: The user introduces themselves ---");
 
     const response1 = await ai.generate({
-        prompt: "Ciao, mi chiamo Ajeje Brazorf e sono uno sviluppatore esperto di Genkit. Ricordatelo per favore.",
-        tools: [addTool!], // Diamo all'IA il potere di scrivere nella memoria
+        prompt: "Hi, my name is Ajeje Brazorf and I am an expert Genkit developer. Please remember that.",
+        tools: [addTool!], // Give the AI the power to write to memory
     });
 
     console.log("AI:", response1.text);
 
-    console.log("\n--- Conversazione 2: L'IA recupera le info ---");
+    console.log("\n--- Conversation 2: The AI retrieves info ---");
 
     const response2 = await ai.generate({
-        prompt: "Chi sono io e di cosa mi occupo?",
-        tools: [searchTool!], // Diamo all'IA il potere di cercare nella memoria
+        prompt: "Who am I and what do I do?",
+        tools: [searchTool!], // Give the AI the power to search memory
     });
 
     console.log("AI:", response2.text);

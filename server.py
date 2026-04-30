@@ -8,7 +8,7 @@ settings = MemorySettings(
     neo4j=Neo4jConfig(
         uri="bolt://localhost:7687",
         username="neo4j",
-        password="apoc1234" # Usa la tua password di Docker qui!
+        password="apoc1234"
     ),
     embedding={
         "provider": "sentence_transformers",
@@ -17,13 +17,9 @@ settings = MemorySettings(
         "dimensions": 384,
     },
     long_term={
-        "embedding_dimension": 384,      # Imposta la taglia corretta per il modello locale
-        "index_name": "entity_embedding_idx" # Assicurati che il nome sia questo
+        "embedding_dimension": 384,
+        "index_name": "entity_embedding_idx"
     }
-    # embedding={
-    #     "provider": "vertex_ai",
-    #     "model": "text-embedding-004"
-    # }
 )
 memory_client = MemoryClient(settings)
 
@@ -63,9 +59,8 @@ async def add_relationship(request: Request):
     target = data.get("target") or data.get("targetId")
     rel_type = data.get("type") or data.get("relationshipType")
     description = data.get("description")
-    
-    # Usiamo argomenti POSIZIONALI per evitare l'errore "unexpected keyword argument"
-    # L'ordine standard è: source_id, target_id, type, description
+
+    # Use positional arguments to avoid "unexpected keyword argument" error
     await memory_client.long_term.add_relationship(
         source,
         target,

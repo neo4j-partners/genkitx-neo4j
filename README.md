@@ -1,10 +1,24 @@
-# Passaggi effettuati
+# Steps TCK
+
+- **Short-term**: Current conversation context; handles immediate flow but vanishes when the session ends.
+
+- **Long-term**: Persistent database, remembers user facts and history across different sessions.
+
+- **Reasoning**: Internal scratchpad, tracks logical steps and intermediate thoughts to solve complex problems.
+
+
+NB: see TCK.md for more details
+
+DOING: --> server-without-llm.py
+```bash
+uv run --python 3.12 --with fastapi --with uvicorn --with "neo4j-agent-memory[sentence-transformers]" uvicorn server-without-llm:app --port 8000 
+```
 
 ```bash
-# Build del client TypeScript del plugin Neo4j
+# Build the TypeScript client for the Neo4j plugin
 npx tsx ../agent-memory-tck/clients/typescript/src/client.ts
 
-# Test del plugin Neo4j con client ufficiale (Python) e genkit-agent-memory-tck
+# Test the Neo4j plugin with the official client (Python) and genkit-agent-memory-tck
 npx tsx test-standalone.ts 
 ```
 
@@ -14,49 +28,47 @@ uv run --python 3.12 --with fastapi --with uvicorn --with "neo4j-agent-memory[se
 
 $ npx tsx test-integration.ts
 giuseppevillani@gvillani genkitx-neo4j % npx tsx test-integration.ts
-1. Inizializzo Genkit con il TUO plugin neo4j...
-2. Recupero i Tool dal registro interno di Genkit...
-✅ Tool registrati con successo in Genkit!
-3. Eseguo il Tool 'addMemoryEntity'...
-✅ Risultato del Tool (Add): Entity TestGenkitVettore saved successfully to memory.
-⏳ Attendo 2 secondi per permettere a Neo4j di indicizzare il vettore...
-4. Eseguo il Tool 'searchMemoryEntities'...
-✅ Risultato del Tool (Search): [
+1. Initializing Genkit with YOUR neo4j plugin...
+2. Retrieving Tools from the internal Genkit registry...
+✅ Tools successfully registered in Genkit!
+3. Executing Tool 'addMemoryEntity'...
+✅ Tool Result (Add): Entity TestGenkitVettore saved successfully to memory.
+⏳ Waiting 2 seconds to allow Neo4j to index the vector...
+4. Executing Tool 'searchMemoryEntities'...
+✅ Tool Result (Search): [
   {
     id: undefined,
     name: 'TestGenkitVettore',
     type: undefined,
     subtype: undefined,
-    description: 'Creato con Genkit e con embedding locale',
+    description: 'Created with Genkit and local embedding',
     embedding: undefined,
     canonicalName: undefined,
     createdAt: undefined
   }
 ]
-
 ```
 
 # TODO
-- TESTARE `npx tsx test-agent.ts` e vedere se funziona
+- Test `npx tsx test-agent.ts` and see if it works
 
 
-- https://gemini.google.com/app/e88135ecadde58e1?hl=it
-- dice di installare `npm install @neo4j-labs/agent-memory`, però sarebbe meglio non installarlo sempre, ma fare come `llm-chunk`, se voglio usare long term lo uso, altrimenti può funzionare anche senza
+- [https://gemini.google.com/app/e88135ecadde58e1?hl=it](https://gemini.google.com/app/e88135ecadde58e1?hl=it)
+- It says to install `npm install @neo4j-labs/agent-memory`, but it would be better not to install it every time. We should do it like `llm-chunk`: if I want to use long-term memory I use it, otherwise it should work without it as well.
 
-- we should sync the model with Neo4j agent-memory tck for compatibility
-  riguardo `messageLabel`
+- We should sync the model with Neo4j agent-memory tck for compatibility regarding `messageLabel`.
 
 
-### nota bene: non ancora disponibile pubblicamente ---
+### Please note: not yet publicly available ---
 
-#### Vai nella cartella della libreria TCK
+#### Go to the TCK library folder
 cd ../agent-memory-tck/clients/typescript
 
-#### Installa le dipendenze interne e compila il codice in JS
+#### Install internal dependencies and compile code to JS
 npm install
 npm run build
 
-#### Torna al tuo progetto
+#### Return to your project
 cd ../../../genkitx-neo4j
 
 ### ---
@@ -71,7 +83,7 @@ This is a Genkit Plugin for Neo4j.
 npm i --save genkitx-neo4j
 ```
 
-## Environment variable
+## Environment variables
 
 Define Neo4j credentials using:
 
