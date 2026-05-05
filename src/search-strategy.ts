@@ -7,35 +7,46 @@ export interface SearchStrategy {
   generateQuery<T extends z.ZodTypeAny>(
     options: { filter?: Record<string, any>; k?: number },
     params: Neo4jParams<T>,
-    content: string
+    content: string,
   ): { query: string; additionalParams: Record<string, any> };
 }
 
 export class VectorFunctionStrategy implements SearchStrategy {
-  cypherPrefix() { return "" }
+  cypherPrefix() {
+    return "";
+  }
 
   generateQuery<EmbedderCustomOptions extends z.ZodTypeAny>(
     options: { filter?: Record<string, any>; k?: number },
     params: Neo4jParams<EmbedderCustomOptions>,
-    content: string
+    content: string,
   ): { query: string; additionalParams: Record<string, any> } {
     const filter = options.filter;
-    const { 
-      indexId, 
-      label, 
-      embeddingProperty = 'embedding', 
-      textProperty = 'text', 
-      fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX
+    const {
+      indexId,
+      label,
+      embeddingProperty = "embedding",
+      textProperty = "text",
+      fullTextIndexName = params.indexId + FULLTEXT_INDEX_SUFFIX,
     } = params;
 
     const nodeLabel = label || indexId;
-    
-    const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null, embedding: Null, id: Null } AS metadata`;
-    const fullTextRetrievalQuery = params?.fullTextRetrievalQuery ?? retrievalQuery;
-    const isHybrid = params?.searchType === 'hybrid';
 
-    if (params?.fullTextQuery == undefined && content == undefined && isHybrid) {
-      throw new Error("Neither fullTextQuery nor content is defined for hybrid search.");
+    const retrievalQuery =
+      params?.retrievalQuery ??
+      `RETURN node.${textProperty} AS text, node {.*, text: Null, embedding: Null, id: Null } AS metadata`;
+    const fullTextRetrievalQuery =
+      params?.fullTextRetrievalQuery ?? retrievalQuery;
+    const isHybrid = params?.searchType === "hybrid";
+
+    if (
+      params?.fullTextQuery == undefined &&
+      content == undefined &&
+      isHybrid
+    ) {
+      throw new Error(
+        "Neither fullTextQuery nor content is defined for hybrid search.",
+      );
     }
 
     if (filter == null) {
@@ -59,13 +70,16 @@ export class VectorFunctionStrategy implements SearchStrategy {
         CALL db.index.vector.queryNodes($index, $k, $embedding) YIELD node, score
         ${retrievalQuery}
       `;
-        
+
       const query = isHybrid ? hybridQuery : vectorQuery;
 
       isHybrid && console.log("Generated Query name:", fullTextIndexName);
-        
+
       const additionalParams = isHybrid
-        ? { fullTextQuery: params?.fullTextQuery ?? content, fullTextIndexName: fullTextIndexName }
+        ? {
+            fullTextQuery: params?.fullTextQuery ?? content,
+            fullTextIndexName: fullTextIndexName,
+          }
         : {};
 
       return { query, additionalParams };
@@ -74,7 +88,7 @@ export class VectorFunctionStrategy implements SearchStrategy {
     if (isHybrid) {
       throw new Error(errorMetadataAndHybrid);
     }
-    
+
     const baseIndexQuery = `
       CYPHER runtime = parallel parallelRuntimeSupport=all 
       MATCH (n:\`${nodeLabel}\`)
@@ -90,32 +104,37 @@ export class VectorFunctionStrategy implements SearchStrategy {
     `;
     const [fSnippets, fParams] = constructMetadataFilter(filter);
 
-    const indexQuery = baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
+    const indexQuery =
+      baseIndexQuery + fSnippets + baseCosineQuery + retrievalQuery;
 
     return { query: indexQuery, additionalParams: fParams };
   }
 }
 
 export class MatchSearchClauseStrategy implements SearchStrategy {
-  cypherPrefix() { return "CYPHER 25" };
+  cypherPrefix() {
+    return "CYPHER 25";
+  }
 
   generateQuery<EmbedderCustomOptions extends z.ZodTypeAny>(
     options: { filter?: Record<string, any>; k?: number },
     params: Neo4jParams<EmbedderCustomOptions>,
-    content: string
+    content: string,
   ): { query: string; additionalParams: Record<string, any> } {
     const { filter, k } = options;
-    const { indexId, textProperty = 'text' } = params;
-    
-    const retrievalQuery = params?.retrievalQuery ?? `RETURN node.${textProperty} AS text, node {.*, text: Null, embedding: Null, id: Null } AS metadata`;
-    
+    const { indexId, textProperty = "text" } = params;
+
+    const retrievalQuery =
+      params?.retrievalQuery ??
+      `RETURN node.${textProperty} AS text, node {.*, text: Null, embedding: Null, id: Null } AS metadata`;
+
     let filterClause = "";
     let additionalParams: Record<string, any> = {};
 
     if (filter) {
       const [fSnippets, fParams] = constructMetadataFilter(filter);
       // Map 'n.' references from constructMetadataFilter to 'node.' for the SEARCH clause
-      filterClause = `WHERE ${fSnippets.replace(/n\./g, 'node.')}`;
+      filterClause = `WHERE ${fSnippets.replace(/n\./g, "node.")}`;
       additionalParams = fParams;
     }
 

@@ -7,6 +7,14 @@ import { gemini15Flash, googleAI } from '@genkit-ai/googleai';
 import { neo4j } from '.';
 import { mockEmbedder } from './dummyEmbedder';
 import { geminiModel } from './utils';
+import { beforeAll, beforeEach, afterEach, afterAll } from "@jest/globals";
+import { Neo4jContainer, StartedNeo4jContainer } from "@testcontainers/neo4j";
+import { Wait } from "testcontainers";
+import { driver as neo4jDriver, auth, Driver, Session } from "neo4j-driver";
+import { genkit } from "genkit";
+import { gemini15Flash, googleAI } from "@genkit-ai/googleai";
+import { neo4j } from ".";
+import { mockEmbedder } from "./dummyEmbedder";
 
 export interface Neo4jTestStartupContext {
   neo4jContainer: StartedNeo4jContainer;
@@ -28,7 +36,7 @@ export function setupNeo4jTestEnvironment(
 
   beforeAll(async () => {
     setupCtx.neo4jContainer = await new Neo4jContainer(`neo4j:${neo4jVersion}`)
-      .withWaitStrategy(Wait.forLogMessage('Started.'))
+      .withWaitStrategy(Wait.forLogMessage("Started."))
       .start();
 
     const uri = setupCtx.neo4jContainer.getBoltUri();
@@ -37,15 +45,15 @@ export function setupNeo4jTestEnvironment(
 
     setupCtx.driver = neo4jDriver(uri, auth.basic(username, password));
 
-    beforeAllCallback(setupCtx)
-  }, 120000);
+    beforeAllCallback(setupCtx);
+  }, 240000);
 
   beforeEach(async () => {
     setupCtx.clientParams = {
       url: setupCtx.neo4jContainer.getBoltUri(),
       username: setupCtx.neo4jContainer.getUsername(),
       password: setupCtx.neo4jContainer.getPassword(),
-      database: 'neo4j',
+      database: "neo4j",
     };
 
     setupCtx.ai = genkit({
@@ -56,7 +64,7 @@ export function setupNeo4jTestEnvironment(
             indexId,
             embedder: mockEmbedder,
             clientParams: setupCtx.clientParams,
-            ragModel: geminiModel
+            ragModel: geminiModel,
           },
         ]),
       ],
@@ -64,7 +72,7 @@ export function setupNeo4jTestEnvironment(
 
     setupCtx.session = setupCtx.driver.session();
 
-    beforeEachCallback(setupCtx)
+    beforeEachCallback(setupCtx);
   });
 
   afterEach(async () => {

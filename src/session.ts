@@ -1,5 +1,5 @@
-import { SessionData, SessionStore } from '@genkit-ai/ai/session';
-import { Driver, auth, driver as neo4jDriver } from 'neo4j-driver';
+import { SessionData, SessionStore } from "@genkit-ai/ai/session";
+import { Driver, auth, driver as neo4jDriver } from "neo4j-driver";
 
 export interface Neo4jSessionStoreConfig {
   url: string;
@@ -35,9 +35,13 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
     this.nextMessageRelType = config.nextMessageRelType || (this.useTckFormat ? 'NEXT_MESSAGE' : 'NEXT');
     this.lastMessageRelType = config.lastMessageRelType || 'LAST_MESSAGE';
     this.firstMessageRelType = config.firstMessageRelType || 'FIRST_MESSAGE';
+    this.sessionLabel = config.sessionLabel || "GenkitSession";
+    this.messageLabel = config.messageLabel || "Message";
+    this.nextMessageRelType = config.nextMessageRelType || "NEXT";
+    this.lastMessageRelType = config.lastMessageRelType || "LAST_MESSAGE";
     this.driver = neo4jDriver(
       this.config.url,
-      auth.basic(this.config.username, this.config.password || ''),
+      auth.basic(this.config.username, this.config.password || ""),
       {},
     );
     this.windowSize = Neo4jSessionStore.DEFAULT_SIZE;
@@ -93,7 +97,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
       });
 
       const threads: Record<string, any[]> = {};
-      messages.forEach(msg => {
+      messages.forEach((msg) => {
         if (!threads[msg.threadId]) {
           threads[msg.threadId] = [];
         }
@@ -124,7 +128,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
          RETURN s`,
         { sessionId, state: JSON.stringify(sessionData.state) },
       );
-      const sessionNodeId = sessionResult.records[0].get('s').identity;
+      const sessionNodeId = sessionResult.records[0].get("s").identity;
 
       let lastNodeId = null;
 
@@ -171,14 +175,15 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
             { content, role: roleToSave, metadata, threadId }
           );
 
-          const newMessageNodeId = createMessageResult.records[0].get('m').identity;
+          const newMessageNodeId =
+            createMessageResult.records[0].get("m").identity;
 
           if (lastNodeId !== null) {
             await tx.run(
               `MATCH (n1), (n2)
                WHERE id(n1) = $lastNodeId AND id(n2) = $newMessageNodeId
                CREATE (n1)-[:${this.nextMessageRelType}]->(n2)`,
-              { lastNodeId, newMessageNodeId }
+              { lastNodeId, newMessageNodeId },
             );
           } else if (this.useTckFormat) {
             await tx.run(
@@ -200,12 +205,13 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
            WITH s
            MATCH (lastNode) WHERE id(lastNode) = $lastNodeId
            CREATE (s)-[:${this.lastMessageRelType}]->(lastNode)`,
-          { sessionId, lastNodeId }
+          { sessionId, lastNodeId },
         );
       }
 
       await tx.commit();
 
+      await tx.commit();
     } finally {
       await session.close();
     }
