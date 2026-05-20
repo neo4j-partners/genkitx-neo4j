@@ -1,8 +1,7 @@
 import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/google-genai';
 import { openAI, gpt4o } from 'genkitx-openai';
 import { neo4j } from './src';
-import { geminiModel } from './src/utils';
+import { geminiModel, openaiModel } from './src/utils';
 
 const indexIdMain = 'omni-agentic-test-index';
 const indexIdIsolated = 'isolated-test-index';
@@ -12,7 +11,7 @@ const DB_PASS = 'password';
 
 const ai = genkit({
     plugins: [
-        googleAI(),
+        openAI(),
         neo4j([
             {
                 indexId: indexIdMain,
@@ -49,6 +48,7 @@ async function runOmniAgent() {
         await ai.registry.lookupAction(`/tool/neo4j/${indexIdMain}/completeReasoningTrace`),
     ];
 
+
     const systemPrompt = `
     You are an AI assistant with access to multi-tier memory:
     1. Short-term (Messages)
@@ -66,7 +66,7 @@ async function runOmniAgent() {
     console.log("\n User: I'm Lino Banfi, a developer from Italy. I'm building a Genkit plugin for Neo4j.");
 
     const response = await ai.generate({
-        model: geminiModel,
+        model: openaiModel,
         system: systemPrompt,
         prompt: "I'm Lino Banfi, a developer from Italy. I'm building a Genkit plugin for Neo4j. Store my preferences and project info.",
         tools: toolsMain,
@@ -79,7 +79,7 @@ async function runOmniAgent() {
     console.log("\n--- Scenario 2: Verification (Main Index) ---");
     console.log("\n User: What do you remember about my background?");
     const response2 = await ai.generate({
-        model: geminiModel,
+        model: openaiModel,
         system: systemPrompt,
         prompt: "What do you remember about my background?",
         tools: toolsMain,
@@ -92,7 +92,7 @@ async function runOmniAgent() {
     console.log("\n--- Scenario 3: Memory Isolation Test (Isolated Index) ---");
     console.log("\n User: What do you remember about my background?");
     const response3 = await ai.generate({
-        model: geminiModel,
+        model: openaiModel,
         system: systemPrompt,
         prompt: "What do you remember about my background?",
         tools: toolsMain,

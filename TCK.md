@@ -1,58 +1,219 @@
-# Genkit Plugin Enhancement Walkthrough
+# Genkitx-neo4j with Neo4j Agent Memory (TCK Integration)
 
-I have updated the Genkit plugin to provide a much more complete and optimized integration with the `neo4j-agent-memory` TCK.
+This document explains how to use `genkitx-neo4j` together with the Neo4j Agent Memory TCK (short-term, long-term and reasoning memory).
 
-## Changes Made
+## Memory Model
 
-### 1. Expanded Toolset in `memory.ts`
-The plugin now exposes a full suite of tools that match the TCK compliance tiers:
-- **Short-Term Memory**: `addMemoryMessage`, `getMemoryConversation`, `listMemorySessions`, `clearMemorySession`.
-- **Long-Term Memory**: `addMemoryEntity`, `addMemoryFact`, `addMemoryPreference`, `addMemoryRelationship`, `searchMemoryEntities`, `getRelatedMemoryEntities`, `mergeDuplicateMemoryEntities`.
-- **Reasoning Memory**: `startReasoningTrace`, `addReasoningStep`, `recordMemoryToolCall`, `completeReasoningTrace`.
+The system supports three types of memory:
 
-### 2. Optimized Connection Management
-- The `MemoryClient` now calls `connect()` once during plugin initialization instead of on every tool call.
-- This significantly reduces latency for agents that make frequent memory operations.
+- Short-term: session-based conversation memory
+- Long-term: persistent entities, facts and preferences
+- Reasoning: structured reasoning traces for agents
 
-### 3. Bug Fixes & Refinement
-- **`addRelationship`**: Fixed a bug where arguments were passed as an object instead of positional parameters.
-- **Default Port**: Updated the default `MEMORY_ENDPOINT` port to **3001** to match the TCK bridge default.
-- **Improved Schemas**: Added detailed descriptions and Zod schemas to all tools to help LLMs understand when and how to use them.
+## Important: @neo4j-labs/agent-memory is not publicly available
 
+The official documentation suggests:
 
-## Testing Strategies
-
-We have implemented several testing strategies to validate the integration:
-
-### 1. Manual Tool Testing (`test-comprehensive.ts`)
-This script verifies that individual tools are correctly registered and communicating with the bridge server.
-- **What it does:** Calls tools one by one programmatically (without an LLM).
-- **Utility:** Quick debugging of communication and correct method signatures.
-
-### 2. Agentic Integration Testing (`test-omni-agentic.ts`)
-This script tests the model's (Gemini) ability to autonomously orchestrate memory tools.
-- **What it does:** Provides tools to the agent and asks it to handle a complex interaction.
-- **Utility:** Verifies that tool descriptions and Zod schemas are clear enough for the LLM to choose the right tool (e.g., saving a fact vs. starting a reasoning trace).
-
-### 3. End-to-End Session Testing (`test-omni.ts`)
-Tests the integration between the plugin and the `Neo4jSessionStore`.
-- **What it does:** Manages thread history (`messages`) through a dedicated session store, combined with long-term memory tools.
-- **Utility:** Verifies the real-world behavior of a full Genkit application.
-
-## Verification Results
-
-- ✅ Short-term message storage and retrieval.
-- ✅ Fact and Preference storage.
-- ✅ Reasoning trace lifecycle (Start -> Step -> ToolCall -> Complete).
-
-To run the tests:
 ```bash
-cd genkit
-# Manual test
-npx tsx test-comprehensive.ts
-# Agentic test (requires Gemini API Key)
-npx tsx test-omni-agentic.ts
+npm install @neo4j-labs/agent-memory
 ```
-*(Ensure the `conformance-ts` server is running on port 3001)*
+
+This currently does not work because the package is not published.
+
+## Manual installation (required)
+
+Clone the repository:
+
+```bash
+git clone https://github.com/neo4j-labs/agent-memory.git
+```
+
+Build the TypeScript client:
+
+```bash
+cd agent-memory/clients/typescript
+npm install
+npm run build
+```
+
+Link it in your project:
+
+```json
+{
+  "devDependencies": {
+    "@neo4j-labs/agent-memory": "file:../agent-memory/clients/typescript"
+  }
+}
+```
+
+## Future installation
+
+Once the package is published:
+
+```bash
+npm install @neo4j-labs/agent-memory
+```
+
+## Running the TCK bridge
+
+### Conformance python
+
+In the cloned agent-memory repository folder (not in the project folder):
+
+```bash
+export NEO4J_PASSWORD=my_secret_password 
+make conformance-python # this will run the file client.py in the agent-memory repo
+```
+
+### Without LLM
+
+```bash
+uv run --python 3.12 \
+  --with fastapi \
+  --with uvicorn \
+  --with "neo4j-agent-memory[sentence-transformers]" \
+  uvicorn server-without-llm:app --port 8000
+```
+
+### With LLM
+
+```bash
+uv run --python 3.12 \
+  --with fastapi \
+  --with uvicorn \
+  --with "neo4j-agent-memory[sentence-transformers]" \
+  uvicorn server:app --port 8000
+```
+
+## Running tests
+
+### Build TCK client
+
+```bash
+npx tsx ../agent-memory/clients/typescript/src/client.ts
+```
+
+### Standalone test
+
+```bash
+npx tsx test-standalone.ts
+```
+
+### Integration test
+
+```bash
+npx tsx test-integration.ts
+```
+
+## Testing strategies
+
+### Manual tool testing
+
+* Calls tools directly without LLM
+```bash
+npx tsx comprehensive.ts
+```
 
 
+### Agentic testing
+
+* Uses an LLM to orchestrate tools
+```bash
+npx test-omni-agentic.ts
+```
+
+
+
+### End-to-end testing
+
+* Full session and memory integration with [session.ts](./src/session.ts)
+```bash
+npx test-omni.ts
+```
+
+### Multi-index isolation
+
+* Ensures separation between indexes
+
+## Available tools
+
+### Short-term
+
+* addMemoryMessage
+* getMemoryConversation
+* listMemorySessions
+* clearMemorySession
+
+### Long-term
+
+* addMemoryEntity
+* addMemoryFact
+* addMemoryPreference
+* addMemoryRelationship
+* searchMemoryEntities
+* getRelatedMemoryEntities
+* mergeDuplicateMemoryEntities
+
+### Reasoning
+
+* startReasoningTrace
+* addReasoningStep
+* recordMemoryToolCall
+* completeReasoningTrace
+
+## Known issues
+
+### properties vs attributes
+
+There is a naming mismatch:
+
+* TypeScript / TCK uses `properties`
+* Python library uses `attributes`
+
+The adapter maps `attributes` to `properties`.
+
+Use `properties` in TypeScript.
+
+## Improvements
+
+* Single connection initialization
+* Fixed addRelationship parameter bug
+* Default port aligned to 3001
+* Improved schemas for LLM usage
+
+## Neo4j configuration
+
+### Python bridge
+
+```bash
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USERNAME=neo4j
+export NEO4J_PASSWORD=password
+```
+
+### Genkit configuration
+
+```ts
+clientParams: { 
+  url: 'bolt://localhost:7687', 
+  username: 'neo4j', 
+  password: 'your_password' 
+}
+```
+
+## Verification
+
+* Short-term memory works
+* Long-term memory works
+* Reasoning traces work
+
+## TODO
+
+```bash
+npx tsx test-agent.ts
+```
+
+* Align messageLabel with TCK
+* Make long-term memory optional
+
+```

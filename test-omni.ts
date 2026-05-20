@@ -32,7 +32,7 @@ const ai = genkit({
     ],
 });
 
-async function runOmniLino() {
+async function runOmni() {
     console.log("🚀 Starting Multi-Memory Agent on Neo4j...");
 
     // Retrieve ALL tools exposed by your plugin following TCK specs
@@ -134,4 +134,4 @@ async function runOmniLino() {
     console.log("   MATCH (n)-[r]->(m) WHERE NOT type(r) IN ['FIRST_MESSAGE', 'NEXT_MESSAGE', 'LAST_MESSAGE'] RETURN n,r,m");
 }
 
-runOmniLino().catch(console.error);
+runOmni().catch(console.error);

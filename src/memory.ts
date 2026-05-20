@@ -38,6 +38,26 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
         password: neo4jConfig.password,
     });
 
+    /**
+     * Helper to resolve a name or ID to a valid UUID.
+     * If the input is not a UUID, it attempts to find an entity with that name.
+     */
+    const resolveId = async (idOrName: string): Promise<string> => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(idOrName)) {
+            return idOrName;
+        }
+        try {
+            const entity = await memoryClient.longTerm.getEntityByName(idOrName);
+            if (entity && entity.id) {
+                return entity.id;
+            }
+        } catch (err) {
+            // If resolution fails, we pass the original string and let the backend handle the validation error
+        }
+        return idOrName;
+    };
+
     // Optional: Validate connection once at startup
     try {
         await memoryClient.connect();
@@ -194,9 +214,11 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
             }),
         },
         async (input) => {
+            const sourceId = await resolveId(input.sourceId);
+            const targetId = await resolveId(input.targetId);
             await memoryClient.longTerm.addRelationship(
-                input.sourceId,
-                input.targetId,
+                sourceId,
+                targetId,
                 input.type,
                 { properties: input.properties }
             );
@@ -232,7 +254,8 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
             }),
         },
         async (input) => {
-            return await memoryClient.longTerm.getRelatedEntities(input.entityId, {
+            const entityId = await resolveId(input.entityId);
+            return await memoryClient.longTerm.getRelatedEntities(entityId, {
                 relationshipType: input.relationshipType,
                 depth: input.depth
             });
@@ -250,9 +273,11 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
             }),
         },
         async (input) => {
+            const sourceId = await resolveId(input.sourceId);
+            const targetId = await resolveId(input.targetId);
             const merged = await memoryClient.longTerm.mergeDuplicateEntities(
-                input.sourceId,
-                input.targetId,
+                sourceId,
+                targetId,
                 { canonicalName: input.canonicalName }
             );
             return `Entities merged into '${merged.name}' (${merged.id}).`;
