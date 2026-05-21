@@ -39,7 +39,7 @@ const ai = genkit({
 async function runAgent() {
     console.log("🚀 Starting Genkit Cognitive Agent with Neo4j Memory...");
 
-    // 1. Retrieve the tools registered by your plugin
+    // Retrieve the tools registered by your plugin
     const addEntityToolA = await ai.registry.lookupAction(`/tool/neo4j/${indexIdA}/addMemoryEntity`);
     const searchToolA = await ai.registry.lookupAction(`/tool/neo4j/${indexIdA}/searchMemoryEntities`);
     const searchToolB = await ai.registry.lookupAction(`/tool/neo4j/${indexIdB}/searchMemoryEntities`);

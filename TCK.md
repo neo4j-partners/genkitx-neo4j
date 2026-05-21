@@ -117,11 +117,22 @@ npx tsx comprehensive.ts
 
 ### Agentic testing
 
-* Uses an LLM to orchestrate tools
+* Basic test uses an LLM to orchestrate tools (with Google Gemini)
+
+```bash
+npx tsx test-agent.ts
+```
+
+
+* More comprehensive an LLM to orchestrate tools (with Google Gemini)
 ```bash
 npx test-omni-agentic.ts
 ```
 
+* Uses an LLM to orchestrate tools (with OpenAI)
+```bash
+npx test-omni-agentic-openai
+```
 
 
 ### End-to-end testing
@@ -129,6 +140,13 @@ npx test-omni-agentic.ts
 * Full session and memory integration with [session.ts](./src/session.ts)
 ```bash
 npx test-omni.ts
+```
+
+
+### Test with reasoning memory
+
+```bash
+npx test-comprehensive.ts
 ```
 
 ### Multi-index isolation
@@ -207,13 +225,7 @@ clientParams: {
 * Long-term memory works
 * Reasoning traces work
 
-## TODO
-
-```bash
-npx tsx test-agent.ts
-```
 
 * Align messageLabel with TCK
 * Make long-term memory optional
 
-```

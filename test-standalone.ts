@@ -7,7 +7,7 @@ import { MemoryClient } from '../clients/typescript/src/index.ts';
 // import { MemoryClient } from "@neo4j-labs/agent-memory";
 
 async function runStandaloneTest() {
-    console.log("1. Initializing MemoryClient towards the Python server...");
+    console.log("Initializing MemoryClient towards the Python server...");
     // We are pointing to the Python server started with uvx
     const memoryClient = new MemoryClient({
         endpoint: "http://localhost:3001",
@@ -17,7 +17,7 @@ async function runStandaloneTest() {
         await memoryClient.connect();
         console.log("✅ Successfully connected to the server!");
 
-        console.log("2. Adding an entity to Long-Term Memory...");
+        console.log("Adding an entity to Long-Term Memory...");
         const entity = await memoryClient.longTerm.addEntity(
             "StandaloneTestEntity",
             "CONCEPT",
@@ -25,7 +25,7 @@ async function runStandaloneTest() {
         );
         console.log(`✅ Entity created! Assigned ID: ${entity.id}`);
 
-        console.log("3. Executing a search to verify it's in the database...");
+        console.log("Executing a search to verify it's in the database...");
         const results = await memoryClient.longTerm.searchEntities("StandaloneTestEntity");
 
         console.log("✅ Results found:");
@@ -36,7 +36,7 @@ async function runStandaloneTest() {
     } catch (error) {
         console.error("❌ Error during test:", error);
     } finally {
-        console.log("4. Closing the connection.");
+        console.log("Closing the connection.");
         await memoryClient.close();
     }
 }

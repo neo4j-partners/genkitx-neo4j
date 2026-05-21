@@ -4,7 +4,7 @@ import { neo4j } from './src'; // Import YOUR local plugin!
 async function runIntegrationTest() {
     const indexId = 'memory-test';
 
-    console.log("1. Initializing Genkit with YOUR neo4j plugin...");
+    console.log("Initializing Genkit with YOUR neo4j plugin...");
 
     const ai = genkit({
         plugins: [
@@ -13,7 +13,7 @@ async function runIntegrationTest() {
                     indexId: indexId,
                     // Adding a mock embedder to satisfy TypeScript
                     embedder: 'mock-embedder' as any,
-                    // 1. Provide the Official Driver with the URL of the REAL Neo4j Database
+                    // Provide the Official Driver with the URL of the REAL Neo4j Database
                     clientParams: {
                         url: 'bolt://localhost:7687',
                         username: 'neo4j',
@@ -27,7 +27,7 @@ async function runIntegrationTest() {
         ],
     });
 
-    console.log("2. Retrieving Tools from the Genkit internal registry...");
+    console.log("Retrieving Tools from the Genkit internal registry...");
     const addAction = await ai.registry.lookupAction(`/tool/neo4j/${indexId}/addMemoryEntity`);
     const searchAction = await ai.registry.lookupAction(`/tool/neo4j/${indexId}/searchMemoryEntities`);
 
@@ -36,7 +36,7 @@ async function runIntegrationTest() {
     }
     console.log("✅ Tools registered successfully in Genkit!");
 
-    console.log("3. Executing 'addMemoryEntity' tool...");
+    console.log("Executing 'addMemoryEntity' tool...");
     const addResult = await addAction({
         name: "TestGenkitVector",
         entityType: "PLUGIN",
@@ -48,7 +48,7 @@ async function runIntegrationTest() {
     console.log("⏳ Waiting 2 seconds for Neo4j to index the vector...");
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    console.log("4. Executing 'searchMemoryEntities' tool...");
+    console.log("Executing 'searchMemoryEntities' tool...");
     const searchResult = await searchAction({
         query: "TestGenkitVector" // <-- Search for the new name
     });

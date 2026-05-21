@@ -51,7 +51,7 @@ async function runOmniAgent() {
 
     const systemPrompt = `
     You are an AI assistant with access to multi-tier memory:
-    1. Short-term (Messages)
+    Short-term (Messages)
     2. Long-term (Entities, Facts, Preferences, Relationships)
     3. Reasoning (Traces, Steps, ToolCalls)
 

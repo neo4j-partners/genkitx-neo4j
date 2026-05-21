@@ -25,7 +25,7 @@ async function testTools() {
 
     const sessionId = "test-session-" + Date.now();
 
-    // 1. Short-Term Memory
+    // Short-Term Memory
     const addMsg = await ai.registry.lookupAction(`/tool/neo4j/${indexId}/addMemoryMessage`);
     console.log("Adding message...");
     await (addMsg as any)({ sessionId, role: 'user', content: 'Hello memory!' });

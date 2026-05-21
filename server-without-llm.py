@@ -2,31 +2,28 @@ from fastapi import FastAPI, Request
 from neo4j_agent_memory import MemoryClient, MemorySettings, Neo4jConfig
 from neo4j_agent_memory.config.settings import ExtractionConfig, ExtractorType, MergeStrategy
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from neo4j_agent_memory import MemoryClient, MemorySettings, Neo4jConfig
-from neo4j_agent_memory.config.settings import ExtractionConfig, ExtractorType, MergeStrategy
 
 app = FastAPI()
 
-# 1. CONFIGURAZIONE "BLINDATA" DEL SERVER
+# SERVER CONFIGURATION
 settings = MemorySettings(
     neo4j=Neo4jConfig(
         uri="bolt://localhost:7687",
         username="neo4j",
-        password="apoc1234"  # Assicurati che corrisponda al tuo DB
+        password="apoc1234"  # Make sure this matches your DB credentials
     ),
-    # Modello di Embedding LOCALE a 384 dimensioni
+    # LOCAL Embedding Model with 384 dimensions
     embedding={
         "provider": "sentence_transformers",
         "model": "all-MiniLM-L6-v2",
         "dimensions": 384
     },
-    # 2. CONFIGURAZIONE NER LOCALE (ZERO API, ZERO LLM)
+    # LOCAL NER CONFIGURATION (ZERO API, ZERO LLM)
     extraction=ExtractionConfig(
         extractor_type=ExtractorType.PIPELINE,
-        enable_spacy=True,          # Usa spaCy (modello statistico ultraveloce)
-        enable_gliner=True,         # Usa GLiNER (modello neurale locale)
-        enable_llm_fallback=False,  # <-- FONDAMENTALE: Spegne le API esterne
+        enable_spacy=True,          # Uses spaCy (ultra-fast statistical model)
+        enable_gliner=True,         # Uses GLiNER (local neural model)
+        enable_llm_fallback=False,  # <-- CRITICAL: Disables external APIs
         merge_strategy=MergeStrategy.CONFIDENCE,
         entity_types=["PERSON", "ORGANIZATION", "LOCATION", "MOVIE", "CHARACTER"]
     )
@@ -36,20 +33,20 @@ memory_client = MemoryClient(settings)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Eseguito all'avvio del server
-    print("Connessione a Neo4j in corso...")
+    # Executed on server startup
+    print("Connecting to Neo4j...")
     await memory_client.connect()
     yield
-    # Eseguito allo spegnimento del server (Ctrl+C)
-    print("Chiusura connessione Neo4j...")
+    # Executed on server shutdown (Ctrl+C)
+    print("Closing Neo4j connection...")
     await memory_client.close()
 
-# MODIFICA LA CREAZIONE DELL'APP:
+# MODIFY THE APP CREATION:
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/add_entity")
 async def add_entity(request: Request):
-    """Usato quando Genkit/Gemini fa il NER e passa i dati esatti"""
+    """Used when Genkit/Gemini performs NER and passes the exact data"""
     data = await request.json()
     name = data.get("name")
     entity_type = data.get("entityType")
@@ -64,14 +61,14 @@ async def add_entity(request: Request):
 
 @app.post("/add_relationship")
 async def add_relationship(request: Request):
-    """Usato quando Genkit/Gemini capisce le relazioni e le passa al server"""
+    """Used when Genkit/Gemini identifies relationships and passes them to the server"""
     data = await request.json()
     source = data.get("source") or data.get("sourceId")
     target = data.get("target") or data.get("targetId")
     rel_type = data.get("type") or data.get("relationshipType")
     description = data.get("description")
     
-    # Risolto l'errore del TypeError usando gli argomenti posizionali
+    # Resolved the TypeError by using positional arguments
     await memory_client.long_term.add_relationship(
         source,
         target,
@@ -91,17 +88,17 @@ async def search_entities(request: Request):
         for r in results
     ]
 
-# --- NUOVA ROTTA PER IL NER LOCALE ---
+# --- NEW ROUTE FOR LOCAL NER ---
 @app.post("/extract_and_save")
 async def extract_and_save(request: Request):
     """
-    Invia un testo grezzo qui. Python userà spaCy e GLiNER 
-    per trovare entità e salvarle in Neo4j, senza usare Gemini!
+    Send raw text here. Python will use spaCy and GLiNER 
+    to extract entities and save them into Neo4j, without using Gemini!
     """
     data = await request.json()
     text = data.get("text")
     
-    # La libreria Python analizzerà il testo con i modelli locali
+    # The Python library will parse the text using local models
     result = await memory_client.long_term.extract_and_save(text)
     
     return {"success": True, "entities_found": len(result)}

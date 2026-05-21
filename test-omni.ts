@@ -11,7 +11,7 @@ const DB_URL = 'bolt://localhost:7687';
 const DB_USER = 'neo4j';
 const DB_PASS = 'password'; // Make sure it's the correct one for your local DB
 
-// 1. Initialize Genkit Session Store (Short-term memory TCK Bronze)
+// Initialize Genkit Session Store (Short-term memory TCK Bronze)
 const sessionStore = new Neo4jSessionStore({
     url: DB_URL,
     username: DB_USER,
@@ -51,7 +51,7 @@ async function runOmni() {
     const systemPrompt = `
     You are an expert archivist of Italian cinema. 
     Use the tools at your disposal to build a precise Knowledge Graph:
-    1. Use 'addMemoryEntity' to save actors, movies, and characters as separate entities (e.g., entityType: 'PERSON', 'MOVIE', 'CHARACTER').
+    Use 'addMemoryEntity' to save actors, movies, and characters as separate entities (e.g., entityType: 'PERSON', 'MOVIE', 'CHARACTER').
     2. STRICTLY use 'addMemoryRelationship' to connect them. For example:
        - (Actor) -[ACTED_IN]-> (Movie)
        - (Actor) -[PLAYS_ROLE]-> (Character)

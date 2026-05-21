@@ -3,7 +3,7 @@ from neo4j_agent_memory import MemoryClient, MemorySettings, Neo4jConfig
 
 app = FastAPI()
 
-# Connessione al tuo database Docker
+# Connection to your Docker database
 settings = MemorySettings(
     neo4j=Neo4jConfig(
         uri="bolt://localhost:7687",
@@ -34,7 +34,7 @@ async def setup():
 @app.post("/add_entity")
 async def add_entity(request: Request):
     data = await request.json()
-    # Intercetta sia camelCase (TS) che snake_case
+    # Supports both camelCase (TS) and snake_case
     entity_type = data.get("entity_type") or data.get("entityType")
     
     entity, _ = await memory_client.long_term.add_entity(
