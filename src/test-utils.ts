@@ -1,3 +1,12 @@
+import { beforeAll, beforeEach, afterEach, afterAll } from '@jest/globals';
+import { Neo4jContainer, StartedNeo4jContainer } from '@testcontainers/neo4j';
+import { Wait } from 'testcontainers';
+import { driver as neo4jDriver, auth, Driver, Session } from 'neo4j-driver';
+import { genkit } from 'genkit';
+import { gemini15Flash, googleAI } from '@genkit-ai/googleai';
+import { neo4j } from '.';
+import { mockEmbedder } from './dummyEmbedder';
+import { geminiModel } from './utils';
 import { beforeAll, beforeEach, afterEach, afterAll } from "@jest/globals";
 import { Neo4jContainer, StartedNeo4jContainer } from "@testcontainers/neo4j";
 import { Wait } from "testcontainers";
@@ -15,11 +24,9 @@ export interface Neo4jTestStartupContext {
   clientParams: any;
 }
 
-export const geminiModel = "googleai/gemini-2.5-flash";
-
 export function setupNeo4jTestEnvironment(
-  neo4jVersion: string = "2026.01.4",
-  indexId: string = "genkit-test-index",
+  neo4jVersion: string = '2026.01.4',
+  indexId: string = 'genkit-test-index',
   beforeAllCallback: (ctx: Neo4jTestStartupContext) => any = () => { },
   beforeEachCallback: (ctx: Neo4jTestStartupContext) => any = () => { },
 ): Neo4jTestStartupContext {

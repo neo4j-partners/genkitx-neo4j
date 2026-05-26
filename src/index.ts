@@ -136,6 +136,7 @@ export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   filterMetadata?: string[];
   ragModel?: any;
   customGraphRagConfigs?: Record<string, GraphRagConfig>;
+  enableAgentMemoryTools?: boolean;
 }
 
 export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
@@ -147,6 +148,12 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
 
     params.map((i) => configureNeo4jGraphRagRetrievers(ai, i));
     params.map((i) => configureNeo4jGraphRagTools(ai, i));
+
+    for (const i of params) {
+      if (i.enableAgentMemoryTools) {
+        await configureNeo4jAgentMemoryTools(ai, i);
+      }
+    }
   });
 }
 
@@ -463,7 +470,7 @@ function getDefaultConfig() {
   if (!url || !username || !password) {
     throw new Error(
       "Please provide Neo4j connection details through environment variables: NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD are required.\n" +
-        "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
+      "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
     );
   }
 

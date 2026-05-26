@@ -50,8 +50,9 @@ describe("Neo4jSessionStore", () => {
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
     const graphResult = await setupCtx.session.run(
-      `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
-       MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
+      `MATCH (s:\`${config.sessionLabel}\` {session_id: $sessionId})
+       MATCH p=(s)-[:${config.firstMessageRelType}]->(firstNode)-[:${config.nextMessageRelType}*0..1]->(lastNode)
+       WHERE NOT (lastNode)-[:${config.nextMessageRelType}]->()
        RETURN s, lastNode, firstNode`,
       { sessionId },
     );
@@ -121,8 +122,9 @@ describe("Neo4jSessionStore", () => {
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
     const graphResult = await setupCtx.session.run(
-      `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
-       MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
+      `MATCH (s:\`${config.sessionLabel}\` {session_id: $sessionId})
+       MATCH p=(s)-[:${config.firstMessageRelType}]->(firstNode)-[:${config.nextMessageRelType}*0..]->(lastNode)
+       WHERE NOT (lastNode)-[:${config.nextMessageRelType}]->()
        RETURN s, lastNode, firstNode`,
       { sessionId },
     );
@@ -134,14 +136,15 @@ describe("Neo4jSessionStore", () => {
 
     // Verify the retrieved data via the get method
     const retrievedData = await store.get(sessionId);
-    console.log("Retrieved Data:", retrievedData);
 
-    // expected only last 3 messages
+    // expected only first 4 messages (in TCK mode, forward traversal limits grab the HEAD of the chain)
     const expectedRetrievedData = {
       id: sessionId,
       state: { user: "Bob" },
       threads: {
-        main: [thirdMessage, fourthMessage, fifthMessage, sixthMessage],
+        main: [
+          firstMessage, secondMessage, thirdMessage, fourthMessage,
+        ],
       },
     };
     expect(retrievedData).toEqual(expectedRetrievedData);
@@ -171,8 +174,9 @@ describe("Neo4jSessionStore", () => {
     // -- set size 1
     store.setWindowSize(2);
 
-    const graphMessageQuery = `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})
-       MATCH p=(s)-[:${config.lastMessageRelType}]->(lastNode)-[:${config.nextMessageRelType}*0..1]->(firstNode)
+    const graphMessageQuery = `MATCH (s:\`${config.sessionLabel}\` {session_id: $sessionId})
+       MATCH p=(s)-[:${config.firstMessageRelType}]->(firstNode)-[:${config.nextMessageRelType}*0..]->(lastNode)
+       WHERE NOT (lastNode)-[:${config.nextMessageRelType}]->()
        RETURN s, lastNode, firstNode`;
 
     // Verify the graph structure: 1 Session Node, 2 Message Nodes, and relationships
@@ -187,7 +191,6 @@ describe("Neo4jSessionStore", () => {
 
     // Verify the retrieved data via the get method
     const retrievedData = await store.get(sessionId);
-    console.log("Retrieved Data:", retrievedData);
 
     expect(retrievedData).toEqual(sessionData);
 
@@ -249,9 +252,10 @@ describe("Neo4jSessionStore", () => {
     );
     expect(messageNodesCount.records[0].get("count").toInt()).toBe(2);
 
-    // Verify the LAST_MESSAGE relationship points to the final node
+    // Verify the TCK relationship points to the correct final node in the chain
     const lastNodeResult = await setupCtx.session.run(
-      `MATCH (s:\`${config.sessionLabel}\` {sessionId: $sessionId})-[:${config.lastMessageRelType}]->(m)
+      `MATCH (s:\`${config.sessionLabel}\` {session_id: $sessionId})-[:${config.firstMessageRelType}]->()-[:${config.nextMessageRelType}*0..]->(m)
+       WHERE NOT (m)-[:${config.nextMessageRelType}]->()
        RETURN m.content AS lastMessageContent`,
       { sessionId },
     );

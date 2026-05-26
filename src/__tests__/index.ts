@@ -125,10 +125,10 @@ describe("Neo4j RAG Retrievers", () => {
         idMetadataKey: "docId",
         cypherIdParamName: "startIds",
         cypherQuery: `
-          MATCH (start:Document)-[:RELATES_TO]->(related:Document)
-          WHERE start.id IN $startIds
-          RETURN related.text AS customText
-        `,
+      MATCH (start:Document)-[:RELATES_TO]->(related:Document)
+      WHERE start.id IN $startIds
+      RETURN related.text AS customText
+    `,
         cypherReturnTextField: "customText",
       },
     );
@@ -189,10 +189,10 @@ describe("Neo4j RAG Retrievers", () => {
           idMetadataKey: "docId",
           cypherIdParamName: "startIds",
           cypherQuery: `
-            MATCH (start:Document)-[:SIBLING_OF]->(sibling:Document)
-            WHERE start.id IN $startIds
-            RETURN sibling.text AS siblingText
-          `,
+        MATCH (start:Document)-[:SIBLING_OF]->(sibling:Document)
+        WHERE start.id IN $startIds
+        RETURN sibling.text AS siblingText
+      `,
           cypherReturnTextField: "siblingText",
         },
       },
@@ -214,10 +214,10 @@ describe("Neo4j RAG Retrievers", () => {
     const session = setupCtx.driver.session();
     await session.run(
       `
-      MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The treasure map is fake."
-      MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The real treasure map is under the floorboards."
-      MERGE (d1)-[:SIBLING_OF]->(d2)
-    `,
+  MERGE (d1:Document {id: $doc1Id}) SET d1.text = "The treasure map is fake."
+  MERGE (d2:Document {id: $doc2Id}) SET d2.text = "The real treasure map is under the floorboards."
+  MERGE (d1)-[:SIBLING_OF]->(d2)
+`,
       { doc1Id, doc2Id },
     );
     await session.close();
@@ -321,8 +321,6 @@ describe("Neo4j Plugin Integration", () => {
 
   // Initialize the before / after / beforeAll / afterAll
   const setupCtx = setupNeo4jTestEnvironment("5.26.16", indexId);
-
-  // --- Integration Tests ---
 
   test("should successfully index a document and verify node creation", async () => {
     // 1. Data Setup
@@ -786,3 +784,31 @@ describe("Neo4j Plugin Integration", () => {
     expect(docs).toHaveLength(0);
   });
 });
+
+describe("Neo4j Agent Memory Tools (Long-Term Memory)", () => {
+  const indexId = 'agent-memory-index';
+  const setupCtx = setupNeo4jTestEnvironment('5.26.16', indexId);
+
+  test("should register and execute add and search memory tools correctly", async () => {
+    /*
+    TODO - test using `enableAgentMemoryTools: true`, e.g.:
+
+    setupCtx.ai = genkit({
+      plugins: [
+        googleAI(),
+        neo4j([
+          {
+            indexId,
+            embedder: mockEmbedder,
+            clientParams: setupCtx.clientParams,
+            enableAgentMemoryTools: true,
+          },
+        ]),
+      ],
+    });
+    
+    */
+    
+
+  })
+})
