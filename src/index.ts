@@ -136,7 +136,6 @@ export interface Neo4jParams<EmbedderCustomOptions extends z.ZodTypeAny> {
   filterMetadata?: string[];
   ragModel?: any;
   customGraphRagConfigs?: Record<string, GraphRagConfig>;
-  // NEW FIELD:
   enableAgentMemoryTools?: boolean;
 }
 
@@ -150,7 +149,6 @@ export function neo4j<EmbedderCustomOptions extends z.ZodTypeAny>(
     params.map((i) => configureNeo4jGraphRagRetrievers(ai, i));
     params.map((i) => configureNeo4jGraphRagTools(ai, i));
 
-    // NEW BLOCK: Initialize Memory Tools if requested
     for (const i of params) {
       if (i.enableAgentMemoryTools) {
         await configureNeo4jAgentMemoryTools(ai, i);

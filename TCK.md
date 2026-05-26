@@ -62,7 +62,7 @@ In the cloned agent-memory repository folder (not in the project folder):
 
 ```bash
 export NEO4J_PASSWORD=my_secret_password 
-make conformance-python # this will run the file client.py in the agent-memory repo
+make conformance-python
 ```
 
 ### Without LLM

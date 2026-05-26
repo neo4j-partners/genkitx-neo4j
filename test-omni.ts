@@ -58,7 +58,7 @@ async function runOmni() {
     3. If you have the 'startReasoningTrace' tool, use it to track your logic.
   `;
 
-    // --- INTERACTION 1: Building the Knowledge Graph ---
+    // INTERACTION 1: Building the Knowledge Graph ---
     console.log("\n👤 User: Inserting complex relational data...");
     const prompt1 = `
     Lino Banfi is a famous Italian actor. 
@@ -94,7 +94,7 @@ async function runOmni() {
     console.log("⏳ Waiting 3 seconds for Neo4j vector indexing and graph settlement...");
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // --- INTERACTION 2: Semantic Retrieval traversing Relationships ---
+    // INTERACTION 2: Semantic Retrieval traversing Relationships ---
     console.log("\n👤 User: Relational Question...");
     const prompt2 = "Who is Pasquale Baudaffi, and who plays him? Mention any other movies that actor has been in. Use your search tools.";
 

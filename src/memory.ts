@@ -65,7 +65,7 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
         console.warn(`[Genkit Neo4j] Warning: Could not connect to memory endpoint at ${memoryEndpoint}. Tools might fail.`);
     }
 
-    // --- TIER BRONZE: SHORT-TERM MEMORY TOOLS ---
+    // TIER BRONZE: SHORT-TERM MEMORY TOOLS ---
 
     ai.defineTool(
         {
@@ -140,7 +140,7 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
         }
     );
 
-    // --- TIER BRONZE / SILVER: LONG-TERM MEMORY TOOLS ---
+    // TIER BRONZE / SILVER: LONG-TERM MEMORY TOOLS ---
 
     ai.defineTool(
         {
@@ -284,7 +284,7 @@ export async function configureNeo4jAgentMemoryTools<EmbedderCustomOptions exten
         }
     );
 
-    // --- TIER SILVER: REASONING MEMORY TOOLS ---
+    // TIER SILVER: REASONING MEMORY TOOLS ---
 
     ai.defineTool(
         {

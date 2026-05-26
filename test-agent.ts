@@ -48,8 +48,8 @@ async function runAgent() {
         throw new Error("Required tools not found! Check your plugin registration.");
     }
 
-    // --- SCENARIO 1: Storing a Fact (Long-term Memory) in Index A ---
-    console.log(`\n--- Scenario 1: Information Ingestion (Index: ${indexIdA}) ---`);
+    //  Storing a Fact (Long-term Memory) in Index A 
+    console.log(`\n Information Ingestion (Index: ${indexIdA}) `);
 
     const ingestPrompt = `
     Lino Banfi is a legendary Italian actor known for his iconic role as Oronzo Canà. 
@@ -69,8 +69,8 @@ async function runAgent() {
     console.log("⏳ Waiting 2 seconds for vector indexing...");
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // --- SCENARIO 2: Knowledge Retrieval (Index A) ---
-    console.log(`\n--- Scenario 2: Semantic Retrieval (Index: ${indexIdA}) ---`);
+    //  Knowledge Retrieval (Index A) 
+    console.log(`\n Semantic Retrieval (Index: ${indexIdA}) `);
 
     const queryPrompt = "Who is Lino Banfi and what is his most famous character?";
 
@@ -81,11 +81,11 @@ async function runAgent() {
 
     console.log("Agent's Final Answer (Expected: Found):", queryResponse.text);
 
-    // --- SCENARIO 3: Isolation Test (Index B) ---
+    //  Isolation Test (Index B) 
     // This scenario verifies that memory is isolated between different indexIds.
     // Even if Lino Banfi was stored in Index A, Index B should be empty and the LLM 
     // should not be able to retrieve that information using tools restricted to Index B.
-    console.log(`\n--- Scenario 3: Memory Isolation Test (Index: ${indexIdB}) ---`);
+    console.log(`\n Memory Isolation Test (Index: ${indexIdB}) `);
     console.log("Asking the same question using tools from a DIFFERENT index...");
 
     const isolationResponse = await ai.generate({
@@ -95,11 +95,11 @@ async function runAgent() {
 
     console.log("Agent's Final Answer (Expected: Not Found/I don't know):", isolationResponse.text);
 
-    // --- SCENARIO 4: Knowledge Graph Expansion (Index A) ---
+    //  Knowledge Graph Expansion (Index A) 
     const relTool = await ai.registry.lookupAction(`/tool/neo4j/${indexIdA}/addMemoryRelationship`);
 
     if (relTool) {
-        console.log("\n--- Scenario 4: Knowledge Graph Expansion ---");
+        console.log(" Knowledge Graph Expansion ");
         // Manually linking Lino to the concept of Italian Cinema
         await relTool({
             sourceId: "Lino Banfi",

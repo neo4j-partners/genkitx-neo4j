@@ -12,7 +12,6 @@ settings = MemorySettings(
         username="neo4j",
         password="apoc1234"  # Make sure this matches your DB credentials
     ),
-    # LOCAL Embedding Model with 384 dimensions
     embedding={
         "provider": "sentence_transformers",
         "model": "all-MiniLM-L6-v2",
@@ -21,9 +20,9 @@ settings = MemorySettings(
     # LOCAL NER CONFIGURATION (ZERO API, ZERO LLM)
     extraction=ExtractionConfig(
         extractor_type=ExtractorType.PIPELINE,
-        enable_spacy=True,          # Uses spaCy (ultra-fast statistical model)
-        enable_gliner=True,         # Uses GLiNER (local neural model)
-        enable_llm_fallback=False,  # <-- CRITICAL: Disables external APIs
+        enable_spacy=True,          
+        enable_gliner=True,         
+        enable_llm_fallback=False,  
         merge_strategy=MergeStrategy.CONFIDENCE,
         entity_types=["PERSON", "ORGANIZATION", "LOCATION", "MOVIE", "CHARACTER"]
     )
@@ -41,7 +40,6 @@ async def lifespan(app: FastAPI):
     print("Closing Neo4j connection...")
     await memory_client.close()
 
-# MODIFY THE APP CREATION:
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/add_entity")
@@ -88,7 +86,6 @@ async def search_entities(request: Request):
         for r in results
     ]
 
-# --- NEW ROUTE FOR LOCAL NER ---
 @app.post("/extract_and_save")
 async def extract_and_save(request: Request):
     """

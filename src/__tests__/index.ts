@@ -322,8 +322,6 @@ describe("Neo4j Plugin Integration", () => {
   // Initialize the before / after / beforeAll / afterAll
   const setupCtx = setupNeo4jTestEnvironment("5.26.16", indexId);
 
-  // --- Integration Tests ---
-
   test("should successfully index a document and verify node creation", async () => {
     // 1. Data Setup
     const uniqueId = `test-doc-${Date.now()}`;

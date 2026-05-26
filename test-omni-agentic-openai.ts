@@ -61,8 +61,8 @@ async function runOmniAgent() {
     - IMPORTANT: Always provide a final conversational response to the user summarizing what you did or what you found. Never leave the response empty.
     `;
 
-    // --- SCENARIO 1: Populate Main Index ---
-    console.log("\n--- Scenario 1: Knowledge Ingestion (Main Index) ---");
+    // Populate Main Index ---
+    console.log("\nKnowledge Ingestion (Main Index) ---");
     console.log("\n User: I'm Lino Banfi, a developer from Italy. I'm building a Genkit plugin for Neo4j.");
 
     const response = await ai.generate({
@@ -75,8 +75,8 @@ async function runOmniAgent() {
 
     console.log("\n Agent Response:", response.text);
 
-    // --- SCENARIO 2: Verify Main Index ---
-    console.log("\n--- Scenario 2: Verification (Main Index) ---");
+    // Verify Main Index ---
+    console.log("\nVerification (Main Index) ---");
     console.log("\n User: What do you remember about my background?");
     const response2 = await ai.generate({
         model: openaiModel,
@@ -88,8 +88,8 @@ async function runOmniAgent() {
 
     console.log("\n Agent Response (Expected: Found):", response2.text);
 
-    // --- SCENARIO 3: Memory Isolation Test (Isolated Index) ---
-    console.log("\n--- Scenario 3: Memory Isolation Test (Isolated Index) ---");
+    // Memory Isolation Test (Isolated Index) ---
+    console.log("\nMemory Isolation Test (Isolated Index) ---");
     console.log("\n User: What do you remember about my background?");
     const response3 = await ai.generate({
         model: openaiModel,
