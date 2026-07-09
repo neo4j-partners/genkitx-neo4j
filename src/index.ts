@@ -175,6 +175,7 @@ export function configureNeo4jGraphRagRetrievers<
       const documents = await pcRetriever.retrieve(
         content.text ?? "",
         options?.k,
+        options?.filter,
       );
       return { documents };
     },
@@ -196,6 +197,7 @@ export function configureNeo4jGraphRagRetrievers<
       const documents = await hydeRetriever.retrieve(
         content.text ?? "",
         options?.k,
+        options?.filter,
       );
       return { documents };
     },
@@ -219,6 +221,7 @@ export function configureNeo4jGraphRagRetrievers<
           const documents = await genericRetriever.retrieve(
             content.text ?? "",
             options?.k,
+            options?.filter,
           );
           return { documents };
         },
@@ -463,7 +466,7 @@ function getDefaultConfig() {
   if (!url || !username || !password) {
     throw new Error(
       "Please provide Neo4j connection details through environment variables: NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD are required.\n" +
-        "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
+      "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
     );
   }
 

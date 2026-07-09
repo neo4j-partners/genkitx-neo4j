@@ -38,7 +38,11 @@ export class GenericGraphRagRetriever {
     return this.config.systemPrompt;
   }
 
-  async retrieve(query: string, k: number = 3): Promise<Document[]> {
+  async retrieve(
+    query: string,
+    k: number = 3,
+    filter?: Record<string, any>,
+  ): Promise<Document[]> {
     let searchQuery = query;
 
     if (this.config.useHyDE && this.config.model) {
@@ -52,7 +56,10 @@ export class GenericGraphRagRetriever {
     const vectorResults = await this.ai.retrieve({
       retriever: this.vectorRetrieverRef,
       query: searchQuery,
-      options: { k: k * 2 },
+      options: {
+        k: k * 2,
+        filter,
+      },
     });
 
     const ids = [

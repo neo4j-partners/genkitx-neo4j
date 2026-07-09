@@ -41,6 +41,61 @@ describe("Neo4j RAG Retrievers", () => {
 
   const setupCtx = setupNeo4jTestEnvironment("5.26.16", indexId);
 
+  test(
+    "SEC-01 fix - ParentChildRetriever honors metadata filter",
+    async () => {
+      const pcRetriever = new ParentChildRetriever(
+        setupCtx.ai,
+        setupCtx.clientParams,
+        INDEXER_REF,
+        VECTOR_RETRIEVER_REF,
+      );
+
+      await pcRetriever.ingestDocument({
+        documents: [
+          {
+            text: "Tenant A secret salary information",
+            metadata: {
+              tenantId: "A",
+            },
+          },
+          {
+            text: "Tenant B secret salary information",
+            metadata: {
+              tenantId: "B",
+            },
+          },
+        ],
+      });
+
+      const docs = await setupCtx.ai.retrieve({
+        retriever: PC_RETRIEVER_REF,
+        query: "salary information",
+        options: {
+          k: 10,
+          filter: {
+            tenantId: "A",
+          },
+        },
+      });
+
+      expect(docs.length).toBeGreaterThan(0);
+
+      expect(
+        docs.some((d) =>
+          d.content?.[0]?.text?.includes("Tenant B"),
+        ),
+      ).toBe(false);
+
+      expect(
+        docs.every((d) =>
+          d.content?.[0]?.text?.includes("Tenant A"),
+        ),
+      ).toBe(true);
+    },
+    30000,
+  );
+
   test("retrieve with ParentChildRetriever", async () => {
     const pcRetriever = new ParentChildRetriever(
       setupCtx.ai,
