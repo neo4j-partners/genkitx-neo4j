@@ -9,7 +9,7 @@ import {
   neo4jParentChildRetrieverRef,
   neo4jRetrieverRef,
 } from "..";
-
+import { randomUUID } from "crypto";
 import { mockEmbedder } from "../dummyEmbedder";
 import { fail } from "assert";
 import {
@@ -363,7 +363,51 @@ describe("Neo4j RAG Retrievers", () => {
       "indexed in Genkit via HypotheticalQuestionRetriever",
     );
   }, 30000);
-});
+
+test(
+  "SEC-02 fix - HyDE rejects duplicate document ids",
+  async () => {
+    const hydeRetriever =
+      new HypotheticalQuestionRetriever(
+        setupCtx.ai,
+        setupCtx.clientParams,
+        INDEXER_REF,
+        VECTOR_RETRIEVER_REF,
+        geminiModel,
+      );
+
+    const sharedDocId = randomUUID();
+    const originalText =
+      "Trusted company refund policy";
+
+    await hydeRetriever.ingestDocument({
+      documents: [
+        {
+          id: sharedDocId,
+          text: originalText,
+          metadata: {
+            owner: "trusted",
+          },
+        },
+      ],
+    });
+
+    await expect(
+      hydeRetriever.ingestDocument({
+        documents: [
+          {
+            id: sharedDocId,
+            text: "POISONED policy",
+            metadata: {
+              owner: "attacker",
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow("already exists");
+  },
+  30000,
+);});
 
 describe("Neo4j Plugin Integration", () => {
   // Unique ID used for the vector index in Neo4j (corresponds to the node label)

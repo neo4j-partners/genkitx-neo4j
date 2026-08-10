@@ -1,5 +1,7 @@
 import { SessionData, SessionStore } from "@genkit-ai/ai/session";
 import { Driver, auth, driver as neo4jDriver } from "neo4j-driver";
+import { safeIdent } from "./filter-utils";
+
 
 export interface Neo4jSessionStoreConfig {
   url: string;
@@ -25,10 +27,12 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
 
   constructor(config: Neo4jSessionStoreConfig) {
     this.config = config;
-    this.sessionLabel = config.sessionLabel || "GenkitSession";
-    this.messageLabel = config.messageLabel || "Message";
-    this.nextMessageRelType = config.nextMessageRelType || "NEXT";
-    this.lastMessageRelType = config.lastMessageRelType || "LAST_MESSAGE";
+    this.sessionLabel = safeIdent(
+      config.sessionLabel || "GenkitSession",
+    );
+    this.messageLabel = safeIdent(config.messageLabel || "Message");
+    this.nextMessageRelType = safeIdent(config.nextMessageRelType || "NEXT");
+    this.lastMessageRelType = safeIdent(config.lastMessageRelType || "LAST_MESSAGE");
     this.driver = neo4jDriver(
       this.config.url,
       auth.basic(this.config.username, this.config.password || ""),
@@ -40,7 +44,22 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
   public setWindowSize(size: number) {
     this.windowSize = size;
   }
+  private async getStoredMessageCount(
+    tx: any,
+    sessionId: string,
+  ): Promise<number> {
+    const result = await tx.run(
+      `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
+     OPTIONAL MATCH p=(s)-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
+     RETURN CASE
+       WHEN lastMessage IS NULL THEN 0
+       ELSE size(nodes(p))
+     END AS count`,
+      { sessionId },
+    );
 
+    return Number(result.records[0]?.get("count") ?? 0);
+  }
   async get(sessionId: string): Promise<SessionData<S> | undefined> {
     const session = this.driver.session({ database: this.config.database });
     try {
@@ -116,10 +135,23 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
         lastNodeId = findLastNodeResult.records[0].get("lastNode").identity;
       }
 
+      const storedCount = await this.getStoredMessageCount(
+        tx,
+        sessionId,
+      );
+      console.log("storedCount =", storedCount);
+      let currentMessageIndex = 0;
+
       for (const threadId in sessionData.threads) {
         const messages = sessionData.threads[threadId];
 
         for (const msg of messages) {
+          if (currentMessageIndex < storedCount) {
+            currentMessageIndex++;
+            continue;
+          }
+          currentMessageIndex++;
+
           const content = JSON.stringify(msg.content);
           const metadata = JSON.stringify(msg.metadata || {});
 
@@ -172,9 +204,10 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
     const session = this.driver.session({ database: this.config.database });
     try {
       await session.run(
-        `MATCH p=(chatSession:${this.sessionLabel} {sessionId: $sessionId})-[:${this.lastMessageRelType}]->(lastMessage)<-[:${this.nextMessageRelType}*0..]-()
-        UNWIND nodes(p) as node
-        DETACH DELETE node`,
+        `MATCH (s:\`${this.sessionLabel}\` {sessionId: $sessionId})
+   OPTIONAL MATCH (s)-[:${this.lastMessageRelType}]->(lastMessage)
+                  <-[:${this.nextMessageRelType}*0..]-(m)
+   DETACH DELETE s, m`,
         { sessionId },
       );
     } finally {
