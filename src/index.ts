@@ -245,13 +245,15 @@ export function configureNeo4jGraphRagTools<
       description:
         "Ingest documents with parent-child-subchunk structure in Neo4j",
       inputSchema: z.object({
-        documents: z.array(
-          z.object({
-            id: z.string().uuid().optional(),
-            text: z.string().max(50_000),
-            metadata: z.record(z.string(), z.any()).optional(),
-          }),
-        ).max(100),
+        documents: z
+          .array(
+            z.object({
+              id: z.string().uuid().optional(),
+              text: z.string().max(50_000),
+              metadata: z.record(z.string(), z.any()).optional(),
+            }),
+          )
+          .max(100),
       }),
     },
     async ({
@@ -274,13 +276,15 @@ export function configureNeo4jGraphRagTools<
       name: `neo4j/${indexId}/hydeIngestor`,
       description: "Ingest documents for HyDE retrieval in Neo4j",
       inputSchema: z.object({
-        documents: z.array(
-          z.object({
-            id: z.string().uuid().optional(),
-            text: z.string().max(50_000),
-            metadata: z.record(z.string(), z.any()).optional(),
-          }),
-        ).max(100),
+        documents: z
+          .array(
+            z.object({
+              id: z.string().uuid().optional(),
+              text: z.string().max(50_000),
+              metadata: z.record(z.string(), z.any()).optional(),
+            }),
+          )
+          .max(100),
       }),
     },
     async ({
@@ -420,8 +424,7 @@ export function configureNeo4jIndexer<
           };
         });
 
-        const createOrMerge =
-          `MERGE (t:\`${safeLabelName}\` {${safeIdProperty}: row.id})`;
+        const createOrMerge = `MERGE (t:\`${safeLabelName}\` {${safeIdProperty}: row.id})`;
 
         const creationQuery =
           params?.creationQuery ??
@@ -489,7 +492,7 @@ function getDefaultConfig() {
   if (!url || !username || !password) {
     throw new Error(
       "Please provide Neo4j connection details through environment variables: NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD are required.\n" +
-      "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
+        "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
     );
   }
 

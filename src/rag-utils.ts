@@ -3,9 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import * as neo4j_driver from "neo4j-driver";
 import { Neo4jGraphConfig } from "genkitx-neo4j";
 
-function serializeMetadata(
-  metadata?: Record<string, unknown>,
-): string {
+function serializeMetadata(metadata?: Record<string, unknown>): string {
   return JSON.stringify(metadata ?? {});
 }
 
@@ -29,7 +27,7 @@ export class GenericGraphRagRetriever {
     protected indexerRef: any,
     protected vectorRetrieverRef: any,
     protected config: GraphRagConfig,
-  ) { }
+  ) {}
 
   public getNeo4jInstance() {
     return neo4j_driver.driver(
@@ -200,7 +198,7 @@ RETURN d
                 metadata: serializeMetadata(doc.metadata),
                 docId,
                 chunkId,
-              }
+              },
             }),
         );
 
@@ -243,7 +241,6 @@ RETURN d
 
     await session.close();
     return { status: "ok", count: documents.length };
-
   }
 }
 
@@ -325,7 +322,7 @@ export class HypotheticalQuestionRetriever extends GenericGraphRagRetriever {
               metadata: {
                 metadata: serializeMetadata(doc.metadata),
                 docId,
-              }
+              },
             }),
           ],
         });

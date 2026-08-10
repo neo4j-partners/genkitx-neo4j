@@ -2,7 +2,6 @@ import { SessionData, SessionStore } from "@genkit-ai/ai/session";
 import { Driver, auth, driver as neo4jDriver } from "neo4j-driver";
 import { safeIdent } from "./filter-utils";
 
-
 export interface Neo4jSessionStoreConfig {
   url: string;
   username: string;
@@ -27,12 +26,12 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
 
   constructor(config: Neo4jSessionStoreConfig) {
     this.config = config;
-    this.sessionLabel = safeIdent(
-      config.sessionLabel || "GenkitSession",
-    );
+    this.sessionLabel = safeIdent(config.sessionLabel || "GenkitSession");
     this.messageLabel = safeIdent(config.messageLabel || "Message");
     this.nextMessageRelType = safeIdent(config.nextMessageRelType || "NEXT");
-    this.lastMessageRelType = safeIdent(config.lastMessageRelType || "LAST_MESSAGE");
+    this.lastMessageRelType = safeIdent(
+      config.lastMessageRelType || "LAST_MESSAGE",
+    );
     this.driver = neo4jDriver(
       this.config.url,
       auth.basic(this.config.username, this.config.password || ""),
@@ -135,10 +134,7 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
         lastNodeId = findLastNodeResult.records[0].get("lastNode").identity;
       }
 
-      const storedCount = await this.getStoredMessageCount(
-        tx,
-        sessionId,
-      );
+      const storedCount = await this.getStoredMessageCount(tx, sessionId);
       console.log("storedCount =", storedCount);
       let currentMessageIndex = 0;
 

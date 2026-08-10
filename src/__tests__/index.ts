@@ -41,60 +41,52 @@ describe("Neo4j RAG Retrievers", () => {
 
   const setupCtx = setupNeo4jTestEnvironment("5.26.16", indexId);
 
-  test(
-    "SEC-01 fix - ParentChildRetriever honors metadata filter",
-    async () => {
-      const pcRetriever = new ParentChildRetriever(
-        setupCtx.ai,
-        setupCtx.clientParams,
-        INDEXER_REF,
-        VECTOR_RETRIEVER_REF,
-      );
+  test("SEC-01 fix - ParentChildRetriever honors metadata filter", async () => {
+    const pcRetriever = new ParentChildRetriever(
+      setupCtx.ai,
+      setupCtx.clientParams,
+      INDEXER_REF,
+      VECTOR_RETRIEVER_REF,
+    );
 
-      await pcRetriever.ingestDocument({
-        documents: [
-          {
-            text: "Tenant A secret salary information",
-            metadata: {
-              tenantId: "A",
-            },
-          },
-          {
-            text: "Tenant B secret salary information",
-            metadata: {
-              tenantId: "B",
-            },
-          },
-        ],
-      });
-
-      const docs = await setupCtx.ai.retrieve({
-        retriever: PC_RETRIEVER_REF,
-        query: "salary information",
-        options: {
-          k: 10,
-          filter: {
+    await pcRetriever.ingestDocument({
+      documents: [
+        {
+          text: "Tenant A secret salary information",
+          metadata: {
             tenantId: "A",
           },
         },
-      });
+        {
+          text: "Tenant B secret salary information",
+          metadata: {
+            tenantId: "B",
+          },
+        },
+      ],
+    });
 
-      expect(docs.length).toBeGreaterThan(0);
+    const docs = await setupCtx.ai.retrieve({
+      retriever: PC_RETRIEVER_REF,
+      query: "salary information",
+      options: {
+        k: 10,
+        filter: {
+          tenantId: "A",
+        },
+      },
+    });
 
-      expect(
-        docs.some((d) =>
-          d.content?.[0]?.text?.includes("Tenant B"),
-        ),
-      ).toBe(false);
+    expect(docs.length).toBeGreaterThan(0);
 
-      expect(
-        docs.every((d) =>
-          d.content?.[0]?.text?.includes("Tenant A"),
-        ),
-      ).toBe(true);
-    },
-    30000,
-  );
+    expect(docs.some((d) => d.content?.[0]?.text?.includes("Tenant B"))).toBe(
+      false,
+    );
+
+    expect(docs.every((d) => d.content?.[0]?.text?.includes("Tenant A"))).toBe(
+      true,
+    );
+  }, 30000);
 
   test("retrieve with ParentChildRetriever", async () => {
     const pcRetriever = new ParentChildRetriever(
@@ -364,21 +356,17 @@ describe("Neo4j RAG Retrievers", () => {
     );
   }, 30000);
 
-test(
-  "SEC-02 fix - HyDE rejects duplicate document ids",
-  async () => {
-    const hydeRetriever =
-      new HypotheticalQuestionRetriever(
-        setupCtx.ai,
-        setupCtx.clientParams,
-        INDEXER_REF,
-        VECTOR_RETRIEVER_REF,
-        geminiModel,
-      );
+  test("SEC-02 fix - HyDE rejects duplicate document ids", async () => {
+    const hydeRetriever = new HypotheticalQuestionRetriever(
+      setupCtx.ai,
+      setupCtx.clientParams,
+      INDEXER_REF,
+      VECTOR_RETRIEVER_REF,
+      geminiModel,
+    );
 
     const sharedDocId = randomUUID();
-    const originalText =
-      "Trusted company refund policy";
+    const originalText = "Trusted company refund policy";
 
     await hydeRetriever.ingestDocument({
       documents: [
@@ -405,9 +393,8 @@ test(
         ],
       }),
     ).rejects.toThrow("already exists");
-  },
-  30000,
-);});
+  }, 30000);
+});
 
 describe("Neo4j Plugin Integration", () => {
   // Unique ID used for the vector index in Neo4j (corresponds to the node label)

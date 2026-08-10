@@ -2,8 +2,6 @@ import { errorMetadataAndHybrid, FULLTEXT_INDEX_SUFFIX, Neo4jParams } from ".";
 import { z } from "genkit";
 import { constructMetadataFilter, safeIdent } from "./filter-utils";
 
-
-
 export interface SearchStrategy {
   cypherPrefix(): string;
   generateQuery<T extends z.ZodTypeAny>(
@@ -35,7 +33,7 @@ export class VectorFunctionStrategy implements SearchStrategy {
     const nodeLabel = safeIdent(label || indexId);
     const embeddingPropertyName = safeIdent(embeddingProperty);
     const fullTextIndexNameValue = safeIdent(fullTextIndexName);
-   const textPropertyName = safeIdent(textProperty);
+    const textPropertyName = safeIdent(textProperty);
 
     const retrievalQuery =
       params?.retrievalQuery ??
@@ -82,9 +80,9 @@ export class VectorFunctionStrategy implements SearchStrategy {
 
       const additionalParams = isHybrid
         ? {
-          fullTextQuery: params?.fullTextQuery ?? content,
-          fullTextIndexName: fullTextIndexNameValue,
-        }
+            fullTextQuery: params?.fullTextQuery ?? content,
+            fullTextIndexName: fullTextIndexNameValue,
+          }
         : {};
 
       return { query, additionalParams };
