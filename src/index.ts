@@ -352,7 +352,7 @@ export function configureNeo4jRetriever<
         );
       });
 
-      // neo4j_instance.close();
+      neo4j_instance.close();
       return { documents };
     },
   );
@@ -473,7 +473,7 @@ export function configureNeo4jIndexer<
         );
       }
 
-      // neo4j_instance.close();
+      neo4j_instance.close();
     },
   );
 }
