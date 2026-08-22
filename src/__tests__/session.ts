@@ -90,7 +90,9 @@ describe("Neo4jSessionStore", () => {
   }, 30000);
 
   test("should return undefined for a non-existent snapshotId", async () => {
-    const retrieved = await store.getSnapshot({ snapshotId: "non-existent-snap-id" });
+    const retrieved = await store.getSnapshot({
+      snapshotId: "non-existent-snap-id",
+    });
     expect(retrieved).toBeUndefined();
   }, 30000);
 
@@ -134,5 +136,4 @@ describe("Neo4jSessionStore", () => {
     expect(result.records).toHaveLength(1);
     await customStore.close();
   }, 30000);
-
 });
