@@ -12,4 +12,20 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    include: [
+      "@babel/runtime/helpers/extends",
+      "@babel/runtime/helpers/objectWithoutPropertiesLoose",
+      "@babel/runtime/helpers/objectDestructuringEmpty",
+      "@tanstack/react-table",
+    ],
+  },
+  build: {
+    rollupOptions: {
+      external: [],
+    },
+    commonjsOptions: {
+      include: [/node_modules/],
+    },
+  },
 });

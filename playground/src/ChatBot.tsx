@@ -1,20 +1,17 @@
+import { CleanIconButton, TextLink, Typography } from "@neo4j-ndl/react";
 import {
-  Avatar,
-  Button,
-  IconButton,
-  TextArea,
-  TextLink,
-  Typography,
-  AiPresence,
-} from "@neo4j-ndl/react";
+  Prompt,
+  Response,
+  Suggestion,
+  Thinking,
+  UserBubble,
+} from "@neo4j-ndl/react/ai";
 import {
   ArrowPathIconOutline,
   Cog6ToothIconOutline,
   HandThumbDownIconOutline,
-  PaperAirplaneIconOutline,
   PlusIconOutline,
   Square2StackIconOutline,
-  StopCircleIconOutline,
   XMarkIconOutline,
 } from "@neo4j-ndl/react/icons";
 import { useEffect, useRef, useState } from "react";
@@ -26,72 +23,7 @@ type Message = {
   isDone?: boolean;
 };
 
-// ─── Custom AI sub-components built from NDL primitives ───────────────────────
-
-/** Renders a user chat bubble with avatar */
-function UserBubble({ children }: { children: string }) {
-  return (
-    <div className="n-flex n-flex-row n-gap-2 n-items-start n-justify-end">
-      <div className="n-max-w-[85%] n-bg-primary-bg-strong n-text-neutral-text-inverse n-rounded-xl n-px-4 n-py-2.5 n-text-sm">
-        {children}
-      </div>
-      <Avatar name="NM" type="letters" size="small" />
-    </div>
-  );
-}
-
-/** Renders an assistant response with basic markdown-ish display */
-function AssistantResponse({ children }: { children: string }) {
-  return (
-    <div className="n-w-full n-text-sm n-text-neutral-text-default n-whitespace-pre-wrap n-break-words n-leading-relaxed">
-      {children || <span className="n-animate-pulse">▍</span>}
-    </div>
-  );
-}
-
-/** Thinking / streaming indicator */
-function ThinkingIndicator({
-  isThinking,
-  thinkingMs,
-}: {
-  isThinking: boolean;
-  thinkingMs?: number;
-}) {
-  return (
-    <div className="n-flex n-flex-row n-items-center n-gap-2 n-text-sm n-text-neutral-text-weaker">
-      <AiPresence isThinking={isThinking} />
-      {!isThinking && thinkingMs !== undefined && (
-        <span>Thought for {(thinkingMs / 1000).toFixed(1)}s</span>
-      )}
-    </div>
-  );
-}
-
-/** Suggestion button */
-function SuggestionButton({
-  children,
-  isPrimary = false,
-  onClick,
-}: {
-  children: string;
-  isPrimary?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      fill={isPrimary ? "filled" : "outlined"}
-      color="primary"
-      size="medium"
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  );
-}
-
-// ─── Main ChatBot component ────────────────────────────────────────────────────
-
-export default function ChatBot() {
+export const Component = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
   const [isThinking, setIsThinking] = useState(false);
@@ -112,18 +44,20 @@ export default function ChatBot() {
     setIsThinking(false);
     setIsStreaming(false);
     setMessages((prev) => {
-      const updated = [...prev];
-      const last = updated[updated.length - 1];
-      if (last?.role === "assistant") last.isDone = true;
-      return updated;
+      const newMessages = [...prev];
+      const lastMessage = newMessages[newMessages.length - 1];
+      if (lastMessage?.role === "assistant") {
+        lastMessage.isDone = true;
+      }
+      return newMessages;
     });
   };
 
   const handleSend = async (overridePrompt?: string) => {
-    const text = overridePrompt ?? prompt;
-    if (!text.trim()) return;
+    const textToSend = overridePrompt || prompt;
+    if (!textToSend.trim()) return;
 
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((prev) => [...prev, { content: textToSend, role: "user" }]);
     setPrompt("");
     setIsThinking(true);
 
@@ -135,7 +69,7 @@ export default function ChatBot() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: textToSend }),
         signal: controller.signal,
       });
 
@@ -145,7 +79,7 @@ export default function ChatBot() {
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "", isDone: false, thinkingTime },
+        { content: "", isDone: false, role: "assistant", thinkingTime },
       ]);
 
       if (!res.body) throw new Error("No response body");
@@ -157,10 +91,8 @@ export default function ChatBot() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split("\n");
-
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const data = line.slice(6).trim();
@@ -170,20 +102,24 @@ export default function ChatBot() {
               if (parsed.text) {
                 accumulated += parsed.text;
                 setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") last.content = accumulated;
-                  return updated;
+                  const newMessages = [...prev];
+                  const lastMessage = newMessages[newMessages.length - 1];
+                  if (lastMessage.role === "assistant") {
+                    lastMessage.content = accumulated;
+                  }
+                  return newMessages;
                 });
               }
             } catch {
               if (data) {
                 accumulated += data;
                 setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") last.content = accumulated;
-                  return updated;
+                  const newMessages = [...prev];
+                  const lastMessage = newMessages[newMessages.length - 1];
+                  if (lastMessage.role === "assistant") {
+                    lastMessage.content = accumulated;
+                  }
+                  return newMessages;
                 });
               }
             }
@@ -193,10 +129,12 @@ export default function ChatBot() {
 
       setIsStreaming(false);
       setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === "assistant") last.isDone = true;
-        return updated;
+        const newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage.role === "assistant") {
+          lastMessage.isDone = true;
+        }
+        return newMessages;
       });
     } catch (err: unknown) {
       if ((err as Error).name === "AbortError") return;
@@ -214,175 +152,142 @@ export default function ChatBot() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleCopy = (content: string) => {
-    navigator.clipboard.writeText(content);
-  };
-
-  const isRunning = isThinking || isStreaming;
-
   return (
     <section className="n-h-screen">
       <div className="n-w-[440px] n-h-full n-flex n-flex-col n-bg-neutral-bg-weak">
-        {/* ── Header ── */}
-        <div className="n-flex n-flex-row n-items-center n-border-b n-border-neutral-border-weak n-p-3">
-          <Typography variant="h5" className="n-mr-auto n-pl-1">
-            Neo4j AI Assistant
-          </Typography>
-          <IconButton isClean ariaLabel="Settings">
-            <Cog6ToothIconOutline />
-          </IconButton>
-          <IconButton isClean ariaLabel="Close">
-            <XMarkIconOutline />
-          </IconButton>
+        <div className="n-flex n-flex-row n-border-b n-border-neutral-border-weak n-p-3">
+          <div className="n-ml-auto">
+            <CleanIconButton description="settings" tooltipProps={{}}>
+              <Cog6ToothIconOutline />
+            </CleanIconButton>
+            <CleanIconButton description="close">
+              <XMarkIconOutline />
+            </CleanIconButton>
+          </div>
         </div>
 
-        {/* ── Messages area ── */}
         <div className="n-p-4 n-flex n-flex-col n-grow n-overflow-y-auto">
           {messages.length === 0 ? (
-            /* Empty state */
-            <div className="n-flex n-flex-col n-gap-8">
-              <Typography variant="h1">
-                Hi there, how can I help you today?
-              </Typography>
-
-              <div className="n-flex n-flex-col n-gap-3">
-                <Typography variant="subheading-medium">Suggestions</Typography>
-                <SuggestionButton
-                  isPrimary
-                  onClick={() => handleSend("I want to import data")}
-                >
-                  I want to import data
-                </SuggestionButton>
-                <SuggestionButton
-                  onClick={() => handleSend("Create an AI agent")}
-                >
-                  Create an AI agent
-                </SuggestionButton>
-                <SuggestionButton
-                  onClick={() => handleSend("Invite project members")}
-                >
-                  Invite project members
-                </SuggestionButton>
-                <SuggestionButton
-                  onClick={() => handleSend("Generate a report")}
-                >
-                  Generate a report
-                </SuggestionButton>
+            <div className="n-flex n-flex-col ">
+              <div className="n-flex n-flex-col n-gap-12">
+                <Typography variant="display">
+                  Hi there, how can I help you today?
+                </Typography>
+                <div className="n-flex n-flex-col n-gap-4">
+                  <Typography variant="body-medium">Suggestions</Typography>
+                  <Suggestion
+                    isPrimary
+                    onClick={() => {
+                      void handleSend("I want to import data");
+                    }}
+                  >
+                    I want to import data
+                  </Suggestion>
+                  <Suggestion
+                    onClick={() => {
+                      void handleSend("Create an AI agent");
+                    }}
+                  >
+                    Create an AI agent
+                  </Suggestion>
+                  <Suggestion
+                    onClick={() => {
+                      void handleSend("Invite project members");
+                    }}
+                  >
+                    Invite project members
+                  </Suggestion>
+                  <Suggestion
+                    onClick={() => {
+                      void handleSend("Generate a report");
+                    }}
+                  >
+                    Generate a report
+                  </Suggestion>
+                </div>
+                <Typography variant="body-medium">
+                  You can also drag and drop files here, or{" "}
+                  <TextLink as="button" type="internal-underline">
+                    browse
+                  </TextLink>
+                  . Supports CVG, MOV, PDF
+                </Typography>
               </div>
-
-              <Typography variant="body-medium">
-                You can also drag and drop files here, or{" "}
-                <TextLink as="button" type="internal-underline">
-                  browse
-                </TextLink>
-                . Supports CSV, MOV, PDF
-              </Typography>
             </div>
           ) : (
-            /* Chat messages */
             <div className="n-flex n-flex-col n-gap-4 n-pb-4">
               {messages.map((msg, idx) => (
                 <div
                   key={idx}
-                  className={`n-flex ${msg.role === "user" ? "n-justify-end" : "n-justify-start"}`}
+                  className={`n-flex ${
+                    msg.role === "user" ? "n-justify-end" : "n-justify-start"
+                  }`}
                 >
                   {msg.role === "user" ? (
-                    <UserBubble>{msg.content}</UserBubble>
+                    <div className="n-max-w-[85%]">
+                      <UserBubble
+                        avatarProps={{
+                          name: "NM",
+                          type: "letters",
+                        }}
+                      >
+                        {msg.content}
+                      </UserBubble>
+                    </div>
                   ) : (
                     <div className="n-w-full n-flex n-flex-col n-gap-2">
                       {msg.thinkingTime !== undefined && (
-                        <ThinkingIndicator
+                        <Thinking
                           isThinking={false}
                           thinkingMs={msg.thinkingTime}
                         />
                       )}
-                      <AssistantResponse>{msg.content}</AssistantResponse>
-                      {msg.isDone && (
-                        <div className="n-flex n-flex-row n-gap-1.5">
-                          <IconButton isClean size="small" ariaLabel="Dislike">
-                            <HandThumbDownIconOutline />
-                          </IconButton>
-                          <IconButton
-                            isClean
-                            size="small"
-                            ariaLabel="Re-run"
-                            onClick={() =>
-                              handleSend(messages[idx - 1]?.content)
-                            }
-                          >
-                            <ArrowPathIconOutline />
-                          </IconButton>
-                          <IconButton
-                            isClean
-                            size="small"
-                            ariaLabel="Copy"
-                            onClick={() => handleCopy(msg.content)}
-                          >
-                            <Square2StackIconOutline />
-                          </IconButton>
-                        </div>
-                      )}
+                      <div className="n-flex n-flex-col n-gap-2">
+                        <Response>{msg.content}</Response>
+                        {msg.isDone === true && (
+                          <div className="n-flex n-flex-row n-gap-1.5">
+                            <CleanIconButton size="small" description="Dislike">
+                              <HandThumbDownIconOutline />
+                            </CleanIconButton>
+                            <CleanIconButton size="small" description="Re-run">
+                              <ArrowPathIconOutline />
+                            </CleanIconButton>
+                            <CleanIconButton size="small" description="Copy">
+                              <Square2StackIconOutline />
+                            </CleanIconButton>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
               ))}
-
-              {isThinking && <ThinkingIndicator isThinking={true} />}
+              {isThinking && <Thinking isThinking={true} />}
               <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        {/* ── Prompt input ── */}
-        <div className="n-px-4 n-pt-2 n-pb-3 n-mt-auto n-border-t n-border-neutral-border-weak">
-          <div className="n-flex n-flex-col n-gap-2 n-bg-neutral-bg-default n-rounded-xl n-p-2 n-shadow-sm">
-            <TextArea
-              isFluid
-              ariaLabel="Type your message"
-              htmlAttributes={{
-                value: prompt,
-                onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setPrompt(e.target.value),
-                onKeyDown: handleKeyDown,
-                placeholder: "Ask anything about Neo4j...",
-                rows: 2,
-                disabled: isRunning,
-              }}
-            />
-            <div className="n-flex n-flex-row n-items-center n-justify-between">
-              <IconButton isClean size="small" ariaLabel="Add files">
+        <div className="n-px-4 n-pt-4 n-pb-1 n-mt-auto">
+          <Prompt
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onSubmitPrompt={() => void handleSend()}
+            onCancelPrompt={handleCancel}
+            isRunningPrompt={isThinking || isStreaming}
+            isSubmitDisabled={
+              prompt.length === 0 && !(isThinking || isStreaming)
+            }
+            bottomContent={
+              <CleanIconButton description="Add files" size="small">
                 <PlusIconOutline />
-              </IconButton>
-              {isRunning ? (
-                <IconButton
-                  size="small"
-                  ariaLabel="Cancel"
-                  isDanger
-                  onClick={handleCancel}
-                >
-                  <StopCircleIconOutline />
-                </IconButton>
-              ) : (
-                <IconButton
-                  size="small"
-                  ariaLabel="Send message"
-                  isDisabled={prompt.trim().length === 0}
-                  onClick={() => handleSend()}
-                >
-                  <PaperAirplaneIconOutline />
-                </IconButton>
-              )}
-            </div>
-          </div>
+              </CleanIconButton>
+            }
+          />
         </div>
       </div>
     </section>
   );
-}
+};
+
+export default Component;
