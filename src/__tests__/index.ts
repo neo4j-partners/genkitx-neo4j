@@ -1,5 +1,5 @@
 import { Document, genkit } from "genkit";
-import { test, describe, expect } from "@jest/globals";
+import { test, describe, expect, jest } from "@jest/globals";
 import {
   configureNeo4jGraphRagRetrievers,
   neo4j,
@@ -19,7 +19,7 @@ import {
 } from "../rag-utils";
 import { geminiModel, setupNeo4jTestEnvironment } from "../test-utils";
 import { googleAI } from "@genkit-ai/googleai";
-
+jest.setTimeout(30000);
 /**
  * This file contains integration tests for the Genkit Neo4j plugin.
  * To run these tests, ensure the following environment variables are set:
