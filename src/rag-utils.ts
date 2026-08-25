@@ -27,7 +27,7 @@ export class GenericGraphRagRetriever {
     protected indexerRef: any,
     protected vectorRetrieverRef: any,
     protected config: GraphRagConfig,
-  ) { }
+  ) {}
 
   public getNeo4jInstance() {
     return neo4j_driver.driver(

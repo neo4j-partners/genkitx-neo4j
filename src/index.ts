@@ -491,7 +491,7 @@ function getDefaultConfig() {
   if (!url || !username || !password) {
     throw new Error(
       "Please provide Neo4j connection details through environment variables: NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD are required.\n" +
-      "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
+        "For more details see https://neo4j.com/docs/api/javascript-driver/current/",
     );
   }
 

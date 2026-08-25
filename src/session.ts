@@ -154,15 +154,16 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
 
       const storedMessages = await this.getStoredMessages(tx, sessionId);
 
-      const incomingMessages = Object.entries(sessionData.threads ?? {}).flatMap(
-        ([threadId, messages]) =>
-          (messages ?? []).map((msg) => ({
-            threadId,
-            msg,
-            content: JSON.stringify(msg.content),
-            role: msg.role,
-            metadata: JSON.stringify(msg.metadata || {}),
-          })),
+      const incomingMessages = Object.entries(
+        sessionData.threads ?? {},
+      ).flatMap(([threadId, messages]) =>
+        (messages ?? []).map((msg) => ({
+          threadId,
+          msg,
+          content: JSON.stringify(msg.content),
+          role: msg.role,
+          metadata: JSON.stringify(msg.metadata || {}),
+        })),
       );
 
       const incomingStartsWithStoredHistory =
@@ -184,7 +185,6 @@ export class Neo4jSessionStore<S = any> implements SessionStore<S> {
         : incomingMessages;
 
       for (const { threadId, msg, content, metadata } of messagesToAppend) {
-
         const createMessageResult = await tx.run(
           `CREATE (m:\`${this.messageLabel}\` {
                content: $content,
